@@ -1,4 +1,4 @@
-# Minecraft Demo 3D
+# Voxel Game 3d
 
 A professional-grade Minecraft clone built with Java and LWJGL 3, following modern game engine architecture principles. This project emphasizes modularity, performance, and expandability, drawing inspiration from Hytale's game engine architecture.
 
