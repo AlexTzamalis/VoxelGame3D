@@ -90,9 +90,61 @@ For detailed development information, see the development documentation in the `
 
 ## License
 
-[Add your license here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**Note**: This is an educational project and a clone/recreation of Minecraft. This project is not affiliated with Mojang Studios or Microsoft. Minecraft is a trademark of Mojang Studios.
 
 ## Contributing
 
-[Add contributing guidelines if applicable]
+Contributions are welcome! This project follows a modular architecture and emphasizes code quality, performance, and expandability.
+
+### How to Contribute
+
+1. **Fork the repository** and clone your fork
+2. **Create a feature branch** (`git checkout -b feature/amazing-feature`)
+3. **Follow the development guidelines**:
+   - Add comprehensive JavaDoc comments to all public classes and methods
+   - Follow Java naming conventions (PascalCase for classes, camelCase for methods/variables)
+   - Keep code modular and loosely coupled
+   - Consider performance implications
+   - Write clean, readable code
+4. **Test your changes** thoroughly
+5. **Commit your changes** with clear, descriptive messages
+6. **Push to your branch** (`git push origin feature/amazing-feature`)
+7. **Open a Pull Request** with a detailed description of your changes
+
+### Development Guidelines
+
+- **JavaDoc**: All public APIs must have comprehensive JavaDoc documentation
+- **Code Style**: Follow SOLID principles and clean code practices
+- **Architecture**: Maintain modularity - new features should not break existing systems
+- **Performance**: Optimize for 60+ FPS, minimize allocations in hot paths
+- **Testing**: Write unit tests for core systems when possible
+
+### What to Contribute
+
+- **Features**: Check the [Development Plan](docs/DEVELOPMENT_PLAN.md) for planned features
+- **Bug Fixes**: Report bugs via Issues, then fix them
+- **Performance Improvements**: Optimize rendering, memory usage, or algorithms
+- **Documentation**: Improve JavaDoc, add examples, or clarify architecture
+- **Assets**: Contribute shaders, textures, or sound effects (with proper licensing)
+
+### Pull Request Process
+
+1. Ensure your code follows the project's coding standards
+2. Update documentation if needed
+3. Test your changes on your local machine
+4. Write a clear PR description explaining:
+   - What changes were made
+   - Why the changes were necessary
+   - How to test the changes
+5. Reference any related issues
+
+### Code of Conduct
+
+- Be respectful and constructive in discussions
+- Focus on the code, not the person
+- Help others learn and improve
+
+Thank you for contributing to this project!
 
