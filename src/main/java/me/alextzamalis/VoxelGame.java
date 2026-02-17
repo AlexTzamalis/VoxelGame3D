@@ -144,8 +144,17 @@ public class VoxelGame implements IGameLogic {
     /** MDI renderer for efficient chunk rendering. */
     private me.alextzamalis.graphics.MDIRenderer mdiRenderer;
     
+    /** LOD manager for distant chunk simplification. */
+    private me.alextzamalis.voxel.LODManager lodManager;
+    
+    /** Simplified chunk mesh builder. */
+    private me.alextzamalis.voxel.SimplifiedChunkMeshBuilder simplifiedChunkMeshBuilder;
+    
     /** Whether to use MDI rendering (can be toggled for testing). */
     private boolean useMDIRendering = true;
+    
+    /** Whether to use LOD system (can be toggled for testing). */
+    private boolean useLOD = true;
     
     /** Block interaction handler. */
     private BlockInteraction blockInteraction;
@@ -416,6 +425,21 @@ public class VoxelGame implements IGameLogic {
             Logger.info("MDI rendering enabled - using Multi-Draw Indirect for chunk rendering");
         }
         
+        // Initialize LOD manager for distant chunk simplification
+        if (useLOD) {
+            int viewDist = getViewDistance();
+            lodManager = new me.alextzamalis.voxel.LODManager(world, viewDist);
+            
+            // Initialize simplified chunk mesh builder
+            simplifiedChunkMeshBuilder = new me.alextzamalis.voxel.SimplifiedChunkMeshBuilder();
+            simplifiedChunkMeshBuilder.setTextureAtlas(textureAtlas);
+            if (globalBufferManager != null) {
+                simplifiedChunkMeshBuilder.setGlobalBufferManager(globalBufferManager);
+            }
+            
+            Logger.info("LOD system enabled - simplified chunks beyond %d chunk radius", viewDist);
+        }
+        
         // Initialize world with heightmap generator
         world = new World(pendingWorldName, pendingWorldSeed);
         world.setGenerator(new HeightmapGenerator(world.getSeed(), 60, 20, 0.015f));
@@ -681,6 +705,11 @@ public class VoxelGame implements IGameLogic {
             
             // Update chunk generation (can be called from update thread)
             asyncChunkManager.updateGeneration(playerChunkX, playerChunkZ);
+            
+            // Update LOD manager (convert chunks to/from simplified based on distance)
+            if (lodManager != null && useLOD) {
+                lodManager.update(playerChunkX, playerChunkZ);
+            }
             
             // NOTE: Mesh building is done in render() method (main thread with OpenGL context)
             
