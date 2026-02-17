@@ -226,11 +226,13 @@ public class PlayerController {
         }
         if (aPressed) {
             Vector3f right = camera.getRight();
+            // A should move LEFT (negative right direction)
             dx -= right.x * speed;
             dz -= right.z * speed;
         }
         if (dPressed) {
             Vector3f right = camera.getRight();
+            // D should move RIGHT (positive right direction)
             dx += right.x * speed;
             dz += right.z * speed;
         }
@@ -270,9 +272,9 @@ public class PlayerController {
             double deltaY = inputManager.getDeltaY();
             
             // Apply rotation directly (no momentum, immediate response)
-            // Invert Y axis for natural mouse look (up = look up, down = look down)
-            float rotX = (float) -deltaY * mouseSensitivity;  // Inverted Y
-            float rotY = (float) deltaX * mouseSensitivity;    // Normal X
+            // Standard FPS camera: mouse up = look up (positive pitch), mouse right = turn right (positive yaw)
+            float rotX = (float) deltaY * mouseSensitivity;   // Fixed: positive deltaY = look up
+            float rotY = (float) deltaX * mouseSensitivity;   // Fixed: positive deltaX = turn right
             camera.rotate(rotX, rotY, 0);
         }
     }
