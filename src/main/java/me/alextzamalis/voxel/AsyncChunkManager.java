@@ -146,12 +146,18 @@ public class AsyncChunkManager {
     public void updateMeshes() {
         if (!running) return;
         
-        // Throttle mesh building to prevent render thread blocking
-        meshBuildFrameCounter++;
-        if (meshBuildFrameCounter < MESH_BUILD_INTERVAL) {
-            return; // Skip this frame
+        // During loading, build meshes every frame (no throttling)
+        // During gameplay, throttle to prevent render thread blocking
+        boolean isDuringLoading = chunksToMesh.size() > 20; // If queue is large, we're likely loading
+        
+        if (!isDuringLoading) {
+            // Throttle mesh building during gameplay
+            meshBuildFrameCounter++;
+            if (meshBuildFrameCounter < MESH_BUILD_INTERVAL) {
+                return; // Skip this frame
+            }
+            meshBuildFrameCounter = 0;
         }
-        meshBuildFrameCounter = 0;
         
         // Build meshes for generated chunks (main thread only - requires OpenGL)
         buildPendingMeshes();
@@ -343,10 +349,14 @@ public class AsyncChunkManager {
             }
         }
         
+        // During loading (large queue), build more meshes per frame
+        boolean isDuringLoading = chunksToMesh.size() > 20;
+        int maxToBuild = isDuringLoading ? 10 : MAX_MESHES_PER_FRAME; // Build 10 per frame during loading
+        
         int built = 0;
         
-        // Only build ONE mesh per call to prevent blocking
-        if (!chunksToMesh.isEmpty() && built < MAX_MESHES_PER_FRAME) {
+        // Build multiple meshes per call during loading to speed up world loading
+        while (!chunksToMesh.isEmpty() && built < maxToBuild) {
             Chunk chunk = chunksToMesh.poll();
             if (chunk != null && chunk.isGenerated()) {
                 try {
@@ -362,7 +372,7 @@ public class AsyncChunkManager {
                     if (chunksToMesh.size() < MAX_CHUNKS_TO_MESH_QUEUE) {
                         chunksToMesh.offer(chunk);
                     }
-                    // Stop trying this frame
+                    break; // Stop trying this frame
                 }
             }
         }

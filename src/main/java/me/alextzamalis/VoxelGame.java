@@ -949,7 +949,8 @@ public class VoxelGame implements IGameLogic {
         // Build meshes on main thread (requires OpenGL context)
         // This must be called from render thread, not update thread
         if (asyncChunkManager != null && currentState == GameState.LOADING) {
-            // During loading, build meshes more frequently
+            // During loading, build meshes as fast as possible (every frame)
+            // This is critical for large view distances (10 chunks = 441 chunks to mesh)
             asyncChunkManager.updateMeshes();
         } else if (asyncChunkManager != null && currentState == GameState.PLAYING) {
             // During gameplay, build meshes more frequently to prevent queue overflow
