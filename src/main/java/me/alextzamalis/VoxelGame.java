@@ -253,17 +253,17 @@ public class VoxelGame implements IGameLogic {
         screenManager.registerScreen(GameState.SETTINGS, settingsScreen);
         
         // Listen for state changes
+        // NOTE: This callback may be called from update thread, so we can't call OpenGL here
+        // Instead, we'll handle OpenGL operations in the render method
         screenManager.setStateChangeListener((oldState, newState) -> {
+            // Only handle non-OpenGL operations here (like cursor)
+            // OpenGL operations (setClearColor) will be handled in render() on main thread
             if (newState == GameState.PLAYING) {
-                // Lock cursor when playing
+                // Lock cursor when playing (GLFW is thread-safe for this)
                 glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-                renderer.setClearColor(0.5f, 0.7f, 1.0f, 1.0f); // Sky blue
             } else {
                 // Show cursor in menus
                 glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-                if (newState != GameState.LOADING) {
-                    renderer.setClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Dark menu
-                }
             }
         });
         
@@ -797,6 +797,14 @@ public class VoxelGame implements IGameLogic {
         renderer.prepare(window);
         
         GameState currentState = screenManager.getCurrentState();
+        
+        // Handle clear color based on game state (must be on main thread for OpenGL)
+        // This ensures OpenGL calls happen on the correct thread
+        if (currentState == GameState.PLAYING) {
+            renderer.setClearColor(0.5f, 0.7f, 1.0f, 1.0f); // Sky blue for in-game
+        } else if (currentState != GameState.LOADING) {
+            renderer.setClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Dark menu background
+        }
         
         if (currentState == GameState.PLAYING && world != null && playerController != null) {
             renderWorld(window);
