@@ -53,7 +53,7 @@ public class AsyncChunkManager {
     private static final int MESH_BUILD_INTERVAL = 5; // Build meshes every 5 frames (more conservative)
     
     /** Maximum chunks to queue for meshing. Prevents unbounded queue growth. */
-    private static final int MAX_CHUNKS_TO_MESH_QUEUE = 20;
+    private static final int MAX_CHUNKS_TO_MESH_QUEUE = 50; // Increased to prevent dropping chunks
     
     /** Maximum pending generation tasks. Reduced to prevent mesh pool exhaustion. */
     private static final int MAX_PENDING_TASKS = 32;

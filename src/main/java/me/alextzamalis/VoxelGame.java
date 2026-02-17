@@ -271,12 +271,16 @@ public class VoxelGame implements IGameLogic {
             if (newState == GameState.PLAYING) {
                 // Lock cursor when playing (GLFW is thread-safe for this)
                 // Also update InputManager's cursor grabbed state so mouse input works
-                if (inputManagerRef != null) {
+                if (inputManagerRef != null && windowRef != null) {
                     inputManagerRef.setCursorGrabbed(true);
-                    inputManagerRef.centerCursor(window);
+                    inputManagerRef.centerCursor(windowRef);
+                    Logger.info("Cursor grabbed for PLAYING state");
                 } else {
                     // Fallback if inputManager not set yet
-                    glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                    if (windowRef != null) {
+                        glfwSetInputMode(windowRef.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                        Logger.warn("Cursor grabbed via fallback (inputManager not set)");
+                    }
                 }
             } else {
                 // Show cursor in menus
@@ -284,7 +288,9 @@ public class VoxelGame implements IGameLogic {
                     inputManagerRef.setCursorGrabbed(false);
                 } else {
                     // Fallback if inputManager not set yet
-                    glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                    if (windowRef != null) {
+                        glfwSetInputMode(windowRef.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                    }
                 }
             }
         });
@@ -722,7 +728,18 @@ public class VoxelGame implements IGameLogic {
      * Updates the playing state.
      */
     private void updatePlaying(float deltaTime, InputManager inputManager) {
-        if (playerController == null || world == null) return;
+        if (playerController == null || world == null) {
+            Logger.warn("updatePlaying: playerController or world is null (playerController=%s, world=%s)", 
+                       playerController != null, world != null);
+            return;
+        }
+        
+        // Ensure cursor is grabbed (in case state change listener didn't fire)
+        if (inputManager != null && !inputManager.isCursorGrabbed() && windowRef != null) {
+            inputManager.setCursorGrabbed(true);
+            inputManager.centerCursor(windowRef);
+            Logger.info("Cursor grabbed in updatePlaying (was not grabbed)");
+        }
         
         playerController.update(deltaTime, inputManager);
         
@@ -917,10 +934,10 @@ public class VoxelGame implements IGameLogic {
             // During loading, build meshes more frequently
             asyncChunkManager.updateMeshes();
         } else if (asyncChunkManager != null && currentState == GameState.PLAYING) {
-            // During gameplay, only build meshes very rarely to prevent blocking
-            // This allows the game to stay responsive
+            // During gameplay, build meshes more frequently to prevent queue overflow
+            // But still throttle to prevent render thread blocking
             gameplayMeshFrameCounter++;
-            if (gameplayMeshFrameCounter >= 30) { // Only every 30 frames (~0.5 per second at 60fps)
+            if (gameplayMeshFrameCounter >= 3) { // Every 3 frames (~20 per second at 60fps)
                 asyncChunkManager.updateMeshes();
                 gameplayMeshFrameCounter = 0;
             }

@@ -185,6 +185,10 @@ public class PlayerController {
      * @param inputManager The input manager
      */
     public void update(float deltaTime, InputManager inputManager) {
+        if (inputManager == null) {
+            return; // Can't update without input manager
+        }
+        
         // Check sprint
         sprinting = inputManager.isKeyPressed(GLFW_KEY_LEFT_CONTROL);
         float currentSpeed = (gameMode == GameMode.CREATIVE ? CREATIVE_FLY_SPEED : movementSpeed);
@@ -245,9 +249,15 @@ public class PlayerController {
         
         // Camera rotation with mouse (when cursor is grabbed)
         if (inputManager.isCursorGrabbed()) {
-            float rotX = (float) inputManager.getDeltaY() * mouseSensitivity;
-            float rotY = (float) inputManager.getDeltaX() * mouseSensitivity;
-            camera.rotate(rotX, rotY, 0);
+            double deltaX = inputManager.getDeltaX();
+            double deltaY = inputManager.getDeltaY();
+            
+            // Only rotate if there's actual mouse movement
+            if (Math.abs(deltaX) > 0.001 || Math.abs(deltaY) > 0.001) {
+                float rotX = (float) deltaY * mouseSensitivity;
+                float rotY = (float) deltaX * mouseSensitivity;
+                camera.rotate(rotX, rotY, 0);
+            }
         }
     }
     
