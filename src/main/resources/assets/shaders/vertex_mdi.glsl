@@ -29,11 +29,13 @@ const float UV_INV_SCALE = 1.0 / UV_SCALE;
 
 /**
  * Unpacks position from packed integer.
+ * Uses GLSL 4.3+ bitwise operations for efficient extraction.
  */
 vec3 unpackPosition(int packed) {
-    int ix = packed & 0x3FF;        // Bits 0-9
-    int iy = (packed >> 10) & 0x3FF; // Bits 10-19
-    int iz = (packed >> 20) & 0x3FF; // Bits 20-29
+    // Extract using bitwise operations (GLSL 4.0+ supports these on integers)
+    int ix = packed & 0x3FF;                   // Bits 0-9
+    int iy = (packed >> 10) & 0x3FF;           // Bits 10-19
+    int iz = (packed >> 20) & 0x3FF;           // Bits 20-29
     
     return vec3(
         float(ix) * POS_INV_SCALE,
@@ -44,10 +46,12 @@ vec3 unpackPosition(int packed) {
 
 /**
  * Unpacks UV coordinates from packed integer.
+ * Uses GLSL 4.3+ bitwise operations for efficient extraction.
  */
 vec2 unpackUV(int packed) {
-    int iu = packed & 0xFFFF;        // Lower 16 bits
-    int iv = (packed >> 16) & 0xFFFF; // Upper 16 bits
+    // Extract using bitwise operations
+    int iu = packed & 0xFFFF;                 // Lower 16 bits
+    int iv = (packed >> 16) & 0xFFFF;         // Upper 16 bits
     
     return vec2(
         float(iu) * UV_INV_SCALE,
@@ -57,10 +61,12 @@ vec2 unpackUV(int packed) {
 
 /**
  * Unpacks normal from packed integer using octahedral decoding.
+ * Uses GLSL 4.3+ bitwise operations for efficient extraction.
  */
 vec3 unpackNormal(int packed) {
-    int ix = packed & 0x3FF;        // Bits 0-9
-    int iy = (packed >> 10) & 0x3FF; // Bits 10-19
+    // Extract using bitwise operations
+    int ix = packed & 0x3FF;                   // Bits 0-9
+    int iy = (packed >> 10) & 0x3FF;           // Bits 10-19
     
     // Convert back to -1 to 1 range
     float x = (float(ix) / 511.5) - 1.0;
@@ -96,10 +102,12 @@ vec3 unpackNormal(int packed) {
 
 /**
  * Unpacks light values from packed integer.
+ * Uses GLSL 4.3+ bitwise operations for efficient extraction.
  */
 vec2 unpackLight(int packed) {
-    int blockLight = packed & 0x0F;        // Lower 4 bits
-    int skyLight = (packed >> 4) & 0x0F;   // Upper 4 bits
+    // Extract using bitwise operations
+    int blockLight = packed & 0x0F;            // Lower 4 bits
+    int skyLight = (packed >> 4) & 0x0F;       // Upper 4 bits (bits 4-7)
     
     return vec2(float(blockLight), float(skyLight));
 }
@@ -138,4 +146,3 @@ void main() {
     clipPos.z += depthBias * clipPos.w; // Apply depth bias in clip space
     gl_Position = clipPos;
 }
-

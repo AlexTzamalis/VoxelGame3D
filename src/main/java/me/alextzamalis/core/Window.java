@@ -1,5 +1,6 @@
 package me.alextzamalis.core;
 
+import me.alextzamalis.util.Logger;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
@@ -90,8 +91,8 @@ public class Window {
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
         
-        // OpenGL version hints (3.3 core profile)
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        // OpenGL version hints (4.3 core profile - required for MDI rendering)
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
@@ -153,6 +154,36 @@ public class Window {
         
         // Initialize OpenGL bindings
         GL.createCapabilities();
+        
+        // Log OpenGL version for debugging
+        String glVersion = glGetString(GL_VERSION);
+        String glRenderer = glGetString(GL_RENDERER);
+        String glVendor = glGetString(GL_VENDOR);
+        Logger.info("OpenGL Version: %s", glVersion != null ? glVersion : "Unknown");
+        Logger.info("OpenGL Renderer: %s", glRenderer != null ? glRenderer : "Unknown");
+        Logger.info("OpenGL Vendor: %s", glVendor != null ? glVendor : "Unknown");
+        
+        // Check if OpenGL 4.3+ is available
+        int majorVersion = 0;
+        int minorVersion = 0;
+        if (glVersion != null) {
+            try {
+                String[] parts = glVersion.split("\\.");
+                if (parts.length >= 2) {
+                    majorVersion = Integer.parseInt(parts[0]);
+                    minorVersion = Integer.parseInt(parts[1].split(" ")[0]);
+                }
+            } catch (Exception e) {
+                Logger.warn("Could not parse OpenGL version: %s", glVersion);
+            }
+        }
+        
+        if (majorVersion < 4 || (majorVersion == 4 && minorVersion < 3)) {
+            Logger.warn("OpenGL 4.3+ required for MDI rendering, but got %d.%d. MDI will be disabled.", 
+                       majorVersion, minorVersion);
+        } else {
+            Logger.info("OpenGL 4.3+ detected (%d.%d), MDI rendering available", majorVersion, minorVersion);
+        }
         
         // Set the clear color (dark blue-gray)
         glClearColor(0.1f, 0.1f, 0.15f, 1.0f);

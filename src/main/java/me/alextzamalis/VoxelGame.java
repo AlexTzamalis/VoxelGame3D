@@ -152,7 +152,7 @@ public class VoxelGame implements IGameLogic {
     private me.alextzamalis.voxel.SimplifiedChunkMeshBuilder simplifiedChunkMeshBuilder;
     
     /** Whether to use MDI rendering (can be toggled for testing). */
-    private boolean useMDIRendering = true;
+    private boolean useMDIRendering = false; // Temporarily disabled until OpenGL 4.3+ is confirmed
     
     /** Whether to use LOD system (can be toggled for testing). */
     private boolean useLOD = true;
@@ -199,7 +199,8 @@ public class VoxelGame implements IGameLogic {
         this.escapeWasPressed = false;
         this.chunksProcessedThisFrame = 0;
         // MDI rendering is enabled by default for performance
-        this.useMDIRendering = true;
+        // MDI rendering disabled by default until OpenGL 4.3+ is confirmed available
+        // this.useMDIRendering = true;
     }
     
     @Override
@@ -214,6 +215,10 @@ public class VoxelGame implements IGameLogic {
         renderer = new Renderer();
         renderer.init();
         renderer.setClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Dark menu background
+        
+        // Check OpenGL version (MDI disabled until shader compilation is fixed)
+        // checkAndEnableMDI(); // TODO: Re-enable when shader syntax is fixed
+        useMDIRendering = false; // Force disable until shader works
         
         // Build texture atlas from all block textures (do this early for fast world loading later)
         Logger.info("Building texture atlas...");
@@ -263,6 +268,41 @@ public class VoxelGame implements IGameLogic {
         glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         
         Logger.info("Voxel Game initialized! Starting in main menu.");
+    }
+    
+    /**
+     * Checks OpenGL version and enables MDI rendering if 4.3+ is available.
+     */
+    private void checkAndEnableMDI() {
+        String glVersion = org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_VERSION);
+        if (glVersion == null) {
+            Logger.warn("Could not determine OpenGL version, MDI disabled");
+            useMDIRendering = false;
+            return;
+        }
+        
+        int majorVersion = 0;
+        int minorVersion = 0;
+        try {
+            String[] parts = glVersion.split("\\.");
+            if (parts.length >= 2) {
+                majorVersion = Integer.parseInt(parts[0]);
+                minorVersion = Integer.parseInt(parts[1].split(" ")[0]);
+            }
+        } catch (Exception e) {
+            Logger.warn("Could not parse OpenGL version: %s", glVersion);
+            useMDIRendering = false;
+            return;
+        }
+        
+        if (majorVersion > 4 || (majorVersion == 4 && minorVersion >= 3)) {
+            useMDIRendering = true;
+            Logger.info("OpenGL %d.%d detected - MDI rendering enabled", majorVersion, minorVersion);
+        } else {
+            useMDIRendering = false;
+            Logger.warn("OpenGL %d.%d detected - MDI requires 4.3+, using fallback rendering", 
+                       majorVersion, minorVersion);
+        }
     }
     
     /**
