@@ -270,10 +270,22 @@ public class VoxelGame implements IGameLogic {
             // OpenGL operations (setClearColor) will be handled in render() on main thread
             if (newState == GameState.PLAYING) {
                 // Lock cursor when playing (GLFW is thread-safe for this)
-                glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                // Also update InputManager's cursor grabbed state so mouse input works
+                if (inputManagerRef != null) {
+                    inputManagerRef.setCursorGrabbed(true);
+                    inputManagerRef.centerCursor(window);
+                } else {
+                    // Fallback if inputManager not set yet
+                    glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                }
             } else {
                 // Show cursor in menus
-                glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                if (inputManagerRef != null) {
+                    inputManagerRef.setCursorGrabbed(false);
+                } else {
+                    // Fallback if inputManager not set yet
+                    glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                }
             }
         });
         
