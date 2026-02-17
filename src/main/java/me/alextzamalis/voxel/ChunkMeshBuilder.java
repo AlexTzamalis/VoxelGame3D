@@ -3,22 +3,18 @@ package me.alextzamalis.voxel;
 import me.alextzamalis.graphics.Mesh;
 import me.alextzamalis.graphics.TextureAtlas;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * Builds optimized meshes for chunks using face culling and texture atlas.
  * 
  * <p>This class generates meshes for chunks by only creating faces that are
- * visible (not adjacent to solid blocks). This significantly reduces the
- * number of triangles rendered.
+ * visible (not adjacent to solid blocks). Includes support for tint colors
+ * for blocks like grass and leaves.
  * 
- * <p>The mesh builder supports:
+ * <p>Performance optimizations:
  * <ul>
- *   <li>Face culling - only visible faces are generated</li>
- *   <li>Texture atlas UV coordinates for each face</li>
- *   <li>Per-block texture selection based on block type</li>
- *   <li>Proper vertex ordering for back-face culling</li>
+ *   <li>Uses primitive arrays instead of boxed Lists to avoid GC pressure</li>
+ *   <li>Pre-allocates arrays based on worst-case estimates</li>
+ *   <li>Reuses vertex/normal/UV arrays to minimize allocations</li>
  * </ul>
  * 
  * @author AlexTzamalis
@@ -26,17 +22,42 @@ import java.util.List;
  */
 public class ChunkMeshBuilder {
     
-    /** Accumulated vertex positions. */
-    private final List<Float> positions;
+    // Pre-allocated arrays for building mesh data
+    // Worst case: every block has all 6 faces visible (surface only scenario)
+    // Realistic estimate: ~10% of blocks are surface blocks with ~3 visible faces average
+    // 16*256*16 = 65536 blocks, ~6500 surface blocks, ~20000 faces, 4 verts each = 80000 vertices
+    private static final int INITIAL_VERTEX_CAPACITY = 80000;
+    private static final int INITIAL_INDEX_CAPACITY = 120000; // 6 indices per face (2 triangles)
     
-    /** Accumulated texture coordinates. */
-    private final List<Float> texCoords;
+    /** Position data (x, y, z per vertex). */
+    private float[] positions;
     
-    /** Accumulated normals. */
-    private final List<Float> normals;
+    /** Texture coordinate data (u, v per vertex). */
+    private float[] texCoords;
     
-    /** Accumulated indices. */
-    private final List<Integer> indices;
+    /** Normal data (nx, ny, nz per vertex). */
+    private float[] normals;
+    
+    /** Tint color data (r, g, b per vertex). */
+    private float[] tints;
+    
+    /** Index data. */
+    private int[] indices;
+    
+    /** Current position in position array. */
+    private int posIndex;
+    
+    /** Current position in texCoord array. */
+    private int texIndex;
+    
+    /** Current position in normal array. */
+    private int normIndex;
+    
+    /** Current position in tint array. */
+    private int tintIndex;
+    
+    /** Current position in index array. */
+    private int indIndex;
     
     /** Current vertex count for indexing. */
     private int vertexCount;
@@ -47,22 +68,34 @@ public class ChunkMeshBuilder {
     /** The texture atlas for UV lookups. */
     private TextureAtlas textureAtlas;
     
+    // Pre-allocated temporary arrays to avoid allocations in hot path
+    private final float[] tempVertices = new float[12]; // 4 vertices * 3 components
+    private final float[] tempUVs = new float[8];       // 4 vertices * 2 components
+    
+    // Cached normal vectors (never change)
+    private static final float[][] FACE_NORMALS = {
+        {0, 1, 0},   // TOP
+        {0, -1, 0},  // BOTTOM
+        {0, 0, -1},  // NORTH
+        {0, 0, 1},   // SOUTH
+        {1, 0, 0},   // EAST
+        {-1, 0, 0}   // WEST
+    };
+    
     /**
-     * Creates a new chunk mesh builder.
+     * Creates a new chunk mesh builder with pre-allocated buffers.
      */
     public ChunkMeshBuilder() {
-        this.positions = new ArrayList<>();
-        this.texCoords = new ArrayList<>();
-        this.normals = new ArrayList<>();
-        this.indices = new ArrayList<>();
-        this.vertexCount = 0;
+        this.positions = new float[INITIAL_VERTEX_CAPACITY * 3];
+        this.texCoords = new float[INITIAL_VERTEX_CAPACITY * 2];
+        this.normals = new float[INITIAL_VERTEX_CAPACITY * 3];
+        this.tints = new float[INITIAL_VERTEX_CAPACITY * 3];
+        this.indices = new int[INITIAL_INDEX_CAPACITY];
         this.blockRegistry = BlockRegistry.getInstance();
     }
     
     /**
      * Sets the texture atlas for UV coordinate lookups.
-     * 
-     * @param atlas The texture atlas
      */
     public void setTextureAtlas(TextureAtlas atlas) {
         this.textureAtlas = atlas;
@@ -72,14 +105,15 @@ public class ChunkMeshBuilder {
      * Builds a mesh for the specified chunk.
      * 
      * @param chunk The chunk to build a mesh for
-     * @return The generated mesh, or null if the chunk is empty
+     * @return The mesh, or null if the chunk has no visible faces
      */
     public Mesh buildMesh(Chunk chunk) {
-        // Clear previous data
-        positions.clear();
-        texCoords.clear();
-        normals.clear();
-        indices.clear();
+        // Reset indices
+        posIndex = 0;
+        texIndex = 0;
+        normIndex = 0;
+        tintIndex = 0;
+        indIndex = 0;
         vertexCount = 0;
         
         // Iterate through all blocks in the chunk
@@ -109,17 +143,24 @@ public class ChunkMeshBuilder {
         }
         
         // Return null if no faces were generated
-        if (positions.isEmpty()) {
+        if (posIndex == 0) {
             return null;
         }
         
-        // Convert lists to arrays
-        float[] posArray = toFloatArray(positions);
-        float[] texArray = toFloatArray(texCoords);
-        float[] normArray = toFloatArray(normals);
-        int[] indArray = toIntArray(indices);
+        // Create trimmed arrays for the actual mesh
+        float[] finalPositions = new float[posIndex];
+        float[] finalTexCoords = new float[texIndex];
+        float[] finalNormals = new float[normIndex];
+        float[] finalTints = new float[tintIndex];
+        int[] finalIndices = new int[indIndex];
         
-        return new Mesh(posArray, texArray, normArray, indArray);
+        System.arraycopy(positions, 0, finalPositions, 0, posIndex);
+        System.arraycopy(texCoords, 0, finalTexCoords, 0, texIndex);
+        System.arraycopy(normals, 0, finalNormals, 0, normIndex);
+        System.arraycopy(tints, 0, finalTints, 0, tintIndex);
+        System.arraycopy(indices, 0, finalIndices, 0, indIndex);
+        
+        return new Mesh(finalPositions, finalTexCoords, finalNormals, finalTints, finalIndices);
     }
     
     /**
@@ -127,8 +168,6 @@ public class ChunkMeshBuilder {
      */
     private void addVisibleFaces(Chunk chunk, int localX, int localY, int localZ,
                                   float worldX, float worldY, float worldZ, Block block) {
-        
-        // Check each face
         for (BlockFace face : BlockFace.values()) {
             if (isFaceVisible(chunk, localX, localY, localZ, face)) {
                 addFace(worldX, worldY, worldZ, face, block);
@@ -156,12 +195,10 @@ public class ChunkMeshBuilder {
         if (nx < 0 || nx >= Chunk.WIDTH || nz < 0 || nz >= Chunk.DEPTH) {
             World world = chunk.getWorld();
             if (world != null) {
-                // Convert to world coordinates and check the neighbor block
                 int worldNX = chunk.getWorldX(x) + face.getOffsetX();
                 int worldNZ = chunk.getWorldZ(z) + face.getOffsetZ();
                 int neighborBlockId = world.getBlock(worldNX, ny, worldNZ);
                 
-                // If neighbor is air or transparent, face is visible
                 if (neighborBlockId == 0) {
                     return true;
                 }
@@ -173,15 +210,14 @@ public class ChunkMeshBuilder {
                 
                 return !neighborBlock.isSolid() || neighborBlock.isTransparent();
             }
-            // No world reference - assume face is NOT visible (conservative)
-            // This prevents rendering at unloaded chunk boundaries
+            // No world reference - don't render at unloaded chunk boundaries
             return false;
         }
         
         // Check the neighbor block within this chunk
         int neighborBlockId = chunk.getBlock(nx, ny, nz);
         if (neighborBlockId == 0) {
-            return true; // Air, face is visible
+            return true;
         }
         
         Block neighborBlock = blockRegistry.getBlock(neighborBlockId);
@@ -189,167 +225,173 @@ public class ChunkMeshBuilder {
             return true;
         }
         
-        // Face is visible if neighbor is not solid or is transparent
         return !neighborBlock.isSolid() || neighborBlock.isTransparent();
     }
     
     /**
-     * Adds a face to the mesh data with proper texture UVs.
-     * 
-     * <p>Vertices are ordered counter-clockwise when viewed from outside the block,
-     * which is the standard for OpenGL front-facing triangles with default winding.
+     * Adds a face to the mesh data with proper texture UVs and tint colors.
      */
     private void addFace(float x, float y, float z, BlockFace face, Block block) {
-        // Get face vertices (ordered for correct winding)
-        float[][] vertices = getFaceVertices(x, y, z, face);
-        float[] normal = getFaceNormal(face);
-        float[][] uvs = getFaceUVs(face, block);
+        // Ensure capacity
+        ensureCapacity();
         
-        // Add vertices
+        // Get vertices directly into temp array
+        getFaceVertices(x, y, z, face, tempVertices);
+        
+        // Get UVs
+        getFaceUVs(face, block, tempUVs);
+        
+        // Get normal (cached, no allocation)
+        float[] normal = FACE_NORMALS[face.ordinal()];
+        
+        // Get tint
+        float[] tint = block.getTint(face);
+        
+        // Add 4 vertices
         for (int i = 0; i < 4; i++) {
-            positions.add(vertices[i][0]);
-            positions.add(vertices[i][1]);
-            positions.add(vertices[i][2]);
+            int vi = i * 3;
+            int ti = i * 2;
             
-            texCoords.add(uvs[i][0]);
-            texCoords.add(uvs[i][1]);
+            // Position
+            positions[posIndex++] = tempVertices[vi];
+            positions[posIndex++] = tempVertices[vi + 1];
+            positions[posIndex++] = tempVertices[vi + 2];
             
-            normals.add(normal[0]);
-            normals.add(normal[1]);
-            normals.add(normal[2]);
+            // Texture coordinates
+            texCoords[texIndex++] = tempUVs[ti];
+            texCoords[texIndex++] = tempUVs[ti + 1];
+            
+            // Normal
+            normals[normIndex++] = normal[0];
+            normals[normIndex++] = normal[1];
+            normals[normIndex++] = normal[2];
+            
+            // Tint
+            tints[tintIndex++] = tint[0];
+            tints[tintIndex++] = tint[1];
+            tints[tintIndex++] = tint[2];
         }
         
-        // Add indices for two triangles (counter-clockwise winding)
-        // Triangle 1: 0, 1, 2
-        // Triangle 2: 0, 2, 3
-        indices.add(vertexCount);
-        indices.add(vertexCount + 1);
-        indices.add(vertexCount + 2);
-        indices.add(vertexCount);
-        indices.add(vertexCount + 2);
-        indices.add(vertexCount + 3);
+        // Add indices for two triangles
+        indices[indIndex++] = vertexCount;
+        indices[indIndex++] = vertexCount + 1;
+        indices[indIndex++] = vertexCount + 2;
+        indices[indIndex++] = vertexCount;
+        indices[indIndex++] = vertexCount + 2;
+        indices[indIndex++] = vertexCount + 3;
         
         vertexCount += 4;
     }
     
     /**
-     * Gets the vertices for a face.
+     * Ensures arrays have enough capacity for another face.
+     */
+    private void ensureCapacity() {
+        // Check if we need to grow arrays (4 vertices per face, 6 indices per face)
+        if (posIndex + 12 > positions.length) {
+            int newCapacity = positions.length * 2;
+            
+            float[] newPositions = new float[newCapacity];
+            System.arraycopy(positions, 0, newPositions, 0, posIndex);
+            positions = newPositions;
+            
+            float[] newNormals = new float[newCapacity];
+            System.arraycopy(normals, 0, newNormals, 0, normIndex);
+            normals = newNormals;
+            
+            float[] newTints = new float[newCapacity];
+            System.arraycopy(tints, 0, newTints, 0, tintIndex);
+            tints = newTints;
+        }
+        
+        if (texIndex + 8 > texCoords.length) {
+            int newCapacity = texCoords.length * 2;
+            float[] newTexCoords = new float[newCapacity];
+            System.arraycopy(texCoords, 0, newTexCoords, 0, texIndex);
+            texCoords = newTexCoords;
+        }
+        
+        if (indIndex + 6 > indices.length) {
+            int newCapacity = indices.length * 2;
+            int[] newIndices = new int[newCapacity];
+            System.arraycopy(indices, 0, newIndices, 0, indIndex);
+            indices = newIndices;
+        }
+    }
+    
+    /**
+     * Gets the vertices for a face directly into the output array.
      * 
-     * <p>Vertices are ordered counter-clockwise when looking at the face from outside.
-     * This ensures correct front-face determination for OpenGL culling.
+     * @param x Block X position
+     * @param y Block Y position
+     * @param z Block Z position
+     * @param face The face
+     * @param out Output array (12 floats: 4 vertices * 3 components)
      */
-    private float[][] getFaceVertices(float x, float y, float z, BlockFace face) {
-        return switch (face) {
-            // TOP face (+Y) - looking down from above, counter-clockwise
-            case TOP -> new float[][] {
-                {x,     y + 1, z + 1},  // 0: back-left
-                {x + 1, y + 1, z + 1},  // 1: back-right
-                {x + 1, y + 1, z},      // 2: front-right
-                {x,     y + 1, z}       // 3: front-left
-            };
-            // BOTTOM face (-Y) - looking up from below, counter-clockwise
-            case BOTTOM -> new float[][] {
-                {x,     y, z},          // 0: front-left
-                {x + 1, y, z},          // 1: front-right
-                {x + 1, y, z + 1},      // 2: back-right
-                {x,     y, z + 1}       // 3: back-left
-            };
-            // NORTH face (-Z) - looking from -Z toward +Z, counter-clockwise
-            case NORTH -> new float[][] {
-                {x + 1, y,     z},      // 0: bottom-right (from outside)
-                {x,     y,     z},      // 1: bottom-left
-                {x,     y + 1, z},      // 2: top-left
-                {x + 1, y + 1, z}       // 3: top-right
-            };
-            // SOUTH face (+Z) - looking from +Z toward -Z, counter-clockwise
-            case SOUTH -> new float[][] {
-                {x,     y,     z + 1},  // 0: bottom-left (from outside)
-                {x + 1, y,     z + 1},  // 1: bottom-right
-                {x + 1, y + 1, z + 1},  // 2: top-right
-                {x,     y + 1, z + 1}   // 3: top-left
-            };
-            // EAST face (+X) - looking from +X toward -X, counter-clockwise
-            case EAST -> new float[][] {
-                {x + 1, y,     z + 1},  // 0: bottom-back (from outside)
-                {x + 1, y,     z},      // 1: bottom-front
-                {x + 1, y + 1, z},      // 2: top-front
-                {x + 1, y + 1, z + 1}   // 3: top-back
-            };
-            // WEST face (-X) - looking from -X toward +X, counter-clockwise
-            case WEST -> new float[][] {
-                {x, y,     z},          // 0: bottom-front (from outside)
-                {x, y,     z + 1},      // 1: bottom-back
-                {x, y + 1, z + 1},      // 2: top-back
-                {x, y + 1, z}           // 3: top-front
-            };
-        };
+    private void getFaceVertices(float x, float y, float z, BlockFace face, float[] out) {
+        switch (face) {
+            case TOP -> {
+                out[0] = x;     out[1] = y + 1; out[2] = z + 1;
+                out[3] = x + 1; out[4] = y + 1; out[5] = z + 1;
+                out[6] = x + 1; out[7] = y + 1; out[8] = z;
+                out[9] = x;     out[10] = y + 1; out[11] = z;
+            }
+            case BOTTOM -> {
+                out[0] = x;     out[1] = y; out[2] = z;
+                out[3] = x + 1; out[4] = y; out[5] = z;
+                out[6] = x + 1; out[7] = y; out[8] = z + 1;
+                out[9] = x;     out[10] = y; out[11] = z + 1;
+            }
+            case NORTH -> {
+                out[0] = x + 1; out[1] = y;     out[2] = z;
+                out[3] = x;     out[4] = y;     out[5] = z;
+                out[6] = x;     out[7] = y + 1; out[8] = z;
+                out[9] = x + 1; out[10] = y + 1; out[11] = z;
+            }
+            case SOUTH -> {
+                out[0] = x;     out[1] = y;     out[2] = z + 1;
+                out[3] = x + 1; out[4] = y;     out[5] = z + 1;
+                out[6] = x + 1; out[7] = y + 1; out[8] = z + 1;
+                out[9] = x;     out[10] = y + 1; out[11] = z + 1;
+            }
+            case EAST -> {
+                out[0] = x + 1; out[1] = y;     out[2] = z + 1;
+                out[3] = x + 1; out[4] = y;     out[5] = z;
+                out[6] = x + 1; out[7] = y + 1; out[8] = z;
+                out[9] = x + 1; out[10] = y + 1; out[11] = z + 1;
+            }
+            case WEST -> {
+                out[0] = x; out[1] = y;     out[2] = z;
+                out[3] = x; out[4] = y;     out[5] = z + 1;
+                out[6] = x; out[7] = y + 1; out[8] = z + 1;
+                out[9] = x; out[10] = y + 1; out[11] = z;
+            }
+        }
     }
     
     /**
-     * Gets the normal vector for a face.
+     * Gets the UV coordinates for a face directly into the output array.
+     * 
+     * @param face The face
+     * @param block The block
+     * @param out Output array (8 floats: 4 vertices * 2 components)
      */
-    private float[] getFaceNormal(BlockFace face) {
-        return switch (face) {
-            case TOP -> new float[] {0, 1, 0};
-            case BOTTOM -> new float[] {0, -1, 0};
-            case NORTH -> new float[] {0, 0, -1};
-            case SOUTH -> new float[] {0, 0, 1};
-            case EAST -> new float[] {1, 0, 0};
-            case WEST -> new float[] {-1, 0, 0};
-        };
-    }
-    
-    /**
-     * Gets the UV coordinates for a face based on the block's texture.
-     */
-    private float[][] getFaceUVs(BlockFace face, Block block) {
-        // Get the texture path for this face
+    private void getFaceUVs(BlockFace face, Block block, float[] out) {
         BlockTextures textures = block.getTextures();
         String texturePath = textures.getTexture(face);
         
-        // If we have a texture atlas, use atlas UVs
         if (textureAtlas != null) {
             float[] atlasUVs = textureAtlas.getUVs(texturePath);
             if (atlasUVs != null) {
-                // atlasUVs format: [u0, v0, u1, v1, u2, v2, u3, v3]
-                // Corresponds to: bottom-left, bottom-right, top-right, top-left
-                return new float[][] {
-                    {atlasUVs[0], atlasUVs[1]},  // 0: bottom-left
-                    {atlasUVs[2], atlasUVs[3]},  // 1: bottom-right
-                    {atlasUVs[4], atlasUVs[5]},  // 2: top-right
-                    {atlasUVs[6], atlasUVs[7]}   // 3: top-left
-                };
+                System.arraycopy(atlasUVs, 0, out, 0, 8);
+                return;
             }
         }
         
-        // Default UVs (full texture) - bottom-left, bottom-right, top-right, top-left
-        return new float[][] {
-            {0, 0},
-            {1, 0},
-            {1, 1},
-            {0, 1}
-        };
-    }
-    
-    /**
-     * Converts a Float list to a float array.
-     */
-    private float[] toFloatArray(List<Float> list) {
-        float[] array = new float[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            array[i] = list.get(i);
-        }
-        return array;
-    }
-    
-    /**
-     * Converts an Integer list to an int array.
-     */
-    private int[] toIntArray(List<Integer> list) {
-        int[] array = new int[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            array[i] = list.get(i);
-        }
-        return array;
+        // Default UVs
+        out[0] = 0; out[1] = 0;
+        out[2] = 1; out[3] = 0;
+        out[4] = 1; out[5] = 1;
+        out[6] = 0; out[7] = 1;
     }
 }

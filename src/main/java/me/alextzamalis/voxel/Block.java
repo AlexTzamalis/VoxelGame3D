@@ -4,16 +4,22 @@ package me.alextzamalis.voxel;
  * Represents a block type in the voxel world.
  * 
  * <p>This class defines the properties of a block type, including its
- * identifier, display name, textures, and physical properties. Blocks
- * are registered in the {@link BlockRegistry} and referenced by their ID.
+ * identifier, display name, textures, tint colors, and physical properties.
+ * Blocks are registered in the {@link BlockRegistry} and referenced by their ID.
  * 
- * <p>The block system is designed to be modular and data-driven, allowing
- * new blocks to be added easily without modifying core engine code.
+ * <p>Tint colors allow grayscale textures to be colorized (like Minecraft's
+ * grass and leaves which are tinted based on biome).
  * 
  * @author AlexTzamalis
  * @since 1.0
  */
 public class Block {
+    
+    /** Default tint color (white - no tinting). */
+    public static final float[] DEFAULT_TINT = {1.0f, 1.0f, 1.0f};
+    
+    /** Grass green tint color. */
+    public static final float[] GRASS_TINT = {0.56f, 0.74f, 0.35f};
     
     /** The unique identifier for this block type. */
     private final String id;
@@ -23,6 +29,9 @@ public class Block {
     
     /** The textures for each face of this block. */
     private final BlockTextures textures;
+    
+    /** The tint colors for each face (top, bottom, sides). */
+    private final BlockTints tints;
     
     /** Whether this block is solid (blocks movement and light). */
     private final boolean solid;
@@ -41,13 +50,12 @@ public class Block {
     
     /**
      * Creates a new block type using a builder.
-     * 
-     * @param builder The block builder
      */
     private Block(Builder builder) {
         this.id = builder.id;
         this.displayName = builder.displayName;
         this.textures = builder.textures;
+        this.tints = builder.tints != null ? builder.tints : new BlockTints(DEFAULT_TINT);
         this.solid = builder.solid;
         this.transparent = builder.transparent;
         this.lightSource = builder.lightSource;
@@ -55,82 +63,28 @@ public class Block {
         this.hardness = builder.hardness;
     }
     
-    /**
-     * Gets the block identifier.
-     * 
-     * @return The block ID (e.g., "minecraft:dirt")
-     */
-    public String getId() {
-        return id;
-    }
+    public String getId() { return id; }
+    public String getDisplayName() { return displayName; }
+    public BlockTextures getTextures() { return textures; }
+    public BlockTints getTints() { return tints; }
+    public boolean isSolid() { return solid; }
+    public boolean isTransparent() { return transparent; }
+    public boolean isLightSource() { return lightSource; }
+    public int getLightLevel() { return lightLevel; }
+    public float getHardness() { return hardness; }
     
     /**
-     * Gets the display name.
+     * Gets the tint color for a specific face.
      * 
-     * @return The display name
+     * @param face The block face
+     * @return RGB tint color array
      */
-    public String getDisplayName() {
-        return displayName;
-    }
-    
-    /**
-     * Gets the block textures.
-     * 
-     * @return The textures for each face
-     */
-    public BlockTextures getTextures() {
-        return textures;
-    }
-    
-    /**
-     * Checks if this block is solid.
-     * 
-     * @return true if solid
-     */
-    public boolean isSolid() {
-        return solid;
-    }
-    
-    /**
-     * Checks if this block is transparent.
-     * 
-     * @return true if transparent
-     */
-    public boolean isTransparent() {
-        return transparent;
-    }
-    
-    /**
-     * Checks if this block is a light source.
-     * 
-     * @return true if it emits light
-     */
-    public boolean isLightSource() {
-        return lightSource;
-    }
-    
-    /**
-     * Gets the light level emitted.
-     * 
-     * @return The light level (0-15)
-     */
-    public int getLightLevel() {
-        return lightLevel;
-    }
-    
-    /**
-     * Gets the hardness.
-     * 
-     * @return The hardness value
-     */
-    public float getHardness() {
-        return hardness;
+    public float[] getTint(BlockFace face) {
+        return tints.getTint(face);
     }
     
     /**
      * Checks if this is the air block.
-     * 
-     * @return true if this is air
      */
     public boolean isAir() {
         return "minecraft:air".equals(id);
@@ -148,105 +102,78 @@ public class Block {
         private final String id;
         private String displayName;
         private BlockTextures textures;
+        private BlockTints tints;
         private boolean solid = true;
         private boolean transparent = false;
         private boolean lightSource = false;
         private int lightLevel = 0;
         private float hardness = 1.0f;
         
-        /**
-         * Creates a new block builder.
-         * 
-         * @param id The unique block identifier
-         */
         public Builder(String id) {
             this.id = id;
             this.displayName = id;
         }
         
-        /**
-         * Sets the display name.
-         * 
-         * @param displayName The display name
-         * @return This builder
-         */
         public Builder displayName(String displayName) {
             this.displayName = displayName;
             return this;
         }
         
-        /**
-         * Sets the textures using a single texture for all faces.
-         * 
-         * @param texturePath The texture path
-         * @return This builder
-         */
         public Builder texture(String texturePath) {
             this.textures = new BlockTextures(texturePath);
             return this;
         }
         
-        /**
-         * Sets the textures.
-         * 
-         * @param textures The block textures
-         * @return This builder
-         */
         public Builder textures(BlockTextures textures) {
             this.textures = textures;
             return this;
         }
         
         /**
-         * Sets whether the block is solid.
-         * 
-         * @param solid true if solid
-         * @return This builder
+         * Sets the tint color for all faces.
          */
+        public Builder tint(float[] tint) {
+            this.tints = new BlockTints(tint);
+            return this;
+        }
+        
+        /**
+         * Sets different tint colors for top, bottom, and sides.
+         */
+        public Builder tints(float[] topTint, float[] bottomTint, float[] sideTint) {
+            this.tints = new BlockTints(topTint, bottomTint, sideTint);
+            return this;
+        }
+        
+        /**
+         * Sets the tints object directly.
+         */
+        public Builder tints(BlockTints tints) {
+            this.tints = tints;
+            return this;
+        }
+        
         public Builder solid(boolean solid) {
             this.solid = solid;
             return this;
         }
         
-        /**
-         * Sets whether the block is transparent.
-         * 
-         * @param transparent true if transparent
-         * @return This builder
-         */
         public Builder transparent(boolean transparent) {
             this.transparent = transparent;
             return this;
         }
         
-        /**
-         * Sets the block as a light source.
-         * 
-         * @param lightLevel The light level (0-15)
-         * @return This builder
-         */
         public Builder lightSource(int lightLevel) {
             this.lightSource = lightLevel > 0;
             this.lightLevel = Math.min(15, Math.max(0, lightLevel));
             return this;
         }
         
-        /**
-         * Sets the hardness.
-         * 
-         * @param hardness The hardness value
-         * @return This builder
-         */
         public Builder hardness(float hardness) {
             this.hardness = hardness;
             return this;
         }
         
-        /**
-         * Builds the block.
-         * 
-         * @return The new Block instance
-         */
         public Block build() {
             if (textures == null) {
                 throw new IllegalStateException("Block must have textures defined");
@@ -255,4 +182,3 @@ public class Block {
         }
     }
 }
-

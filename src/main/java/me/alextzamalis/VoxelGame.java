@@ -7,6 +7,8 @@ import me.alextzamalis.graphics.*;
 import me.alextzamalis.input.InputManager;
 import me.alextzamalis.util.Logger;
 import me.alextzamalis.util.ResourceLoader;
+import me.alextzamalis.physics.BlockInteraction;
+import me.alextzamalis.physics.BlockRaycast;
 import me.alextzamalis.voxel.Block;
 import me.alextzamalis.voxel.BlockFace;
 import me.alextzamalis.voxel.BlockRegistry;
@@ -21,24 +23,19 @@ import static org.lwjgl.glfw.GLFW.*;
 /**
  * Main voxel game implementation using the modular engine systems.
  * 
- * <p>This class demonstrates the proper use of the engine's modular architecture:
- * <ul>
- *   <li>{@link PlayerController} - handles all player input and camera</li>
- *   <li>{@link World} - manages chunks and block data</li>
- *   <li>{@link me.alextzamalis.world.WorldGenerator} - generates terrain</li>
- *   <li>{@link BlockRegistry} - provides block type information</li>
- *   <li>{@link TextureAtlas} - combines all block textures for efficient rendering</li>
- * </ul>
- * 
  * <p>Controls:
  * <ul>
  *   <li>Click to grab mouse for camera look</li>
  *   <li>WASD - Move</li>
- *   <li>Space/Shift - Move up/down</li>
+ *   <li>Space - Jump (survival) / Fly up (creative)</li>
+ *   <li>Shift - Fly down (creative)</li>
  *   <li>Left Ctrl - Sprint</li>
+ *   <li>Left Click - Break block</li>
+ *   <li>Right Click - Place block</li>
+ *   <li>1-7 - Select block type</li>
  *   <li>Escape - Release mouse / Close game</li>
  *   <li>F1 - Toggle wireframe mode</li>
- *   <li>F3 - Toggle debug info</li>
+ *   <li>F3 - Toggle game mode (creative/survival)</li>
  * </ul>
  * 
  * @author AlexTzamalis
@@ -49,8 +46,20 @@ public class VoxelGame implements IGameLogic {
     /** View distance in chunks. */
     private static final int VIEW_DISTANCE = 4;
     
+    /** Unload distance multiplier (chunks beyond VIEW_DISTANCE * this are unloaded). */
+    private static final float UNLOAD_DISTANCE_MULTIPLIER = 1.5f;
+    
+    /** Maximum chunks to generate/rebuild per frame (prevents frame drops). */
+    private static final int MAX_CHUNKS_PER_FRAME = 2;
+    
     /** Block texture tile size in pixels. */
     private static final int TEXTURE_TILE_SIZE = 16;
+    
+    /** Light direction (sun position). */
+    private static final Vector3f LIGHT_DIRECTION = new Vector3f(0.5f, 1.0f, 0.3f).normalize();
+    
+    /** Ambient light color/intensity. */
+    private static final Vector3f AMBIENT_COLOR = new Vector3f(0.4f, 0.4f, 0.4f);
     
     /** The renderer. */
     private Renderer renderer;
@@ -73,27 +82,26 @@ public class VoxelGame implements IGameLogic {
     /** Frustum culler for visibility testing. */
     private FrustumCuller frustumCuller;
     
-    /** Debug display flag. */
-    private boolean showDebug;
+    /** Block interaction handler. */
+    private BlockInteraction blockInteraction;
+    
+    /** Block highlight renderer. */
+    private BlockHighlight blockHighlight;
     
     /** F1 key state for toggle. */
     private boolean f1WasPressed;
     
-    /** F3 key state for toggle. */
-    private boolean f3WasPressed;
+    /** Frame counter for chunk loading rate limiting. */
+    private int chunksProcessedThisFrame;
     
     /**
      * Creates a new voxel game.
      */
     public VoxelGame() {
-        this.showDebug = false;
         this.f1WasPressed = false;
-        this.f3WasPressed = false;
+        this.chunksProcessedThisFrame = 0;
     }
     
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void init(Window window) throws Exception {
         Logger.info("Initializing Voxel Game...");
@@ -120,15 +128,16 @@ public class VoxelGame implements IGameLogic {
         shaderProgram.createUniform("projectionMatrix");
         shaderProgram.createUniform("viewMatrix");
         shaderProgram.createUniform("modelMatrix");
-        shaderProgram.createUniform("color");
         shaderProgram.createUniform("useTexture");
         shaderProgram.createUniform("textureSampler");
+        shaderProgram.createUniform("lightDirection");
+        shaderProgram.createUniform("ambientColor");
         
         // Initialize player controller
         Logger.info("Initializing player...");
         playerController = new PlayerController();
         playerController.init(window, new Vector3f(0, 70, 0));
-        playerController.setMovementSpeed(10.0f); // Faster for testing
+        playerController.setMovementSpeed(10.0f);
         
         // Initialize transformation
         transformation = new Transformation();
@@ -140,7 +149,17 @@ public class VoxelGame implements IGameLogic {
         Logger.info("Creating world...");
         world = new World("TestWorld", 12345L);
         world.setGenerator(new HeightmapGenerator(world.getSeed(), 60, 20, 0.015f));
-        world.setTextureAtlas(textureAtlas); // Set atlas for mesh building
+        world.setTextureAtlas(textureAtlas);
+        
+        // Initialize block interaction
+        blockInteraction = new BlockInteraction(world);
+        
+        // Initialize block highlight
+        blockHighlight = new BlockHighlight();
+        blockHighlight.init();
+        
+        // Set world reference for player physics
+        playerController.setWorld(world);
         
         // Load initial chunks around player
         Logger.info("Generating initial chunks...");
@@ -148,14 +167,14 @@ public class VoxelGame implements IGameLogic {
         world.loadChunksAround((int) playerPos.x, (int) playerPos.z, VIEW_DISTANCE);
         
         Logger.info("Voxel Game initialized! %d chunks loaded.", world.getChunkCount());
-        Logger.info("Controls: Click to look, WASD to move, Space/Shift up/down, Ctrl to sprint");
-        Logger.info("F1 = wireframe, F3 = debug info, Escape = release mouse/quit");
+        Logger.info("Controls: Click to look, WASD to move, Space = jump/fly up, Shift = fly down");
+        Logger.info("Left Click = break block, Right Click = place block, 1-7 = select block");
+        Logger.info("F1 = wireframe, F3 = toggle game mode (creative/survival), Escape = quit");
+        Logger.info("Current game mode: %s", playerController.getGameMode());
     }
     
     /**
      * Builds a texture atlas from all registered block textures.
-     * 
-     * @return The built texture atlas
      */
     private TextureAtlas buildTextureAtlas() {
         TextureAtlas atlas = new TextureAtlas(TEXTURE_TILE_SIZE);
@@ -163,30 +182,22 @@ public class VoxelGame implements IGameLogic {
         
         // Add all unique textures from all blocks
         for (Block block : registry.getAllBlocks()) {
-            if (block.isAir()) {
-                continue;
-            }
+            if (block.isAir()) continue;
             
-            // Add textures for each face
             for (BlockFace face : BlockFace.values()) {
                 String texturePath = block.getTextures().getTexture(face);
                 atlas.addTexture(texturePath);
             }
         }
         
-        // Build the atlas
         atlas.build();
-        
         Logger.info("Texture atlas built with %d unique textures", atlas.getTilesPerRow() * atlas.getTilesPerRow());
         return atlas;
     }
     
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void input(Window window, InputManager inputManager) {
-        // Process player input (cursor grab, escape)
+        // Process player input (includes F3 for game mode toggle)
         if (playerController.processInput(window, inputManager)) {
             window.setWindowShouldClose(true);
         }
@@ -198,38 +209,69 @@ public class VoxelGame implements IGameLogic {
             Logger.info("Wireframe: %s", renderer.isWireframe() ? "ON" : "OFF");
         }
         f1WasPressed = f1Pressed;
-        
-        // Toggle debug with F3
-        boolean f3Pressed = window.isKeyPressed(GLFW_KEY_F3);
-        if (f3Pressed && !f3WasPressed) {
-            showDebug = !showDebug;
-            Logger.info("Debug display: %s", showDebug ? "ON" : "OFF");
-        }
-        f3WasPressed = f3Pressed;
     }
     
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void update(float deltaTime, InputManager inputManager) {
-        // Update player
         playerController.update(deltaTime, inputManager);
         
-        // Load chunks around player
-        Vector3f playerPos = playerController.getPosition();
-        world.loadChunksAround((int) playerPos.x, (int) playerPos.z, VIEW_DISTANCE);
+        // Update block highlight (raycasting)
+        blockHighlight.update(playerController.getCamera(), world);
         
-        // Debug output
-        if (showDebug) {
-            // Print debug info periodically (every ~60 frames)
-            // In a real game, this would be rendered on screen
-        }
+        // Update block interaction (breaking/placing)
+        blockInteraction.update(playerController.getCamera(), inputManager, deltaTime);
+        
+        // Load chunks around player (rate-limited to prevent frame drops)
+        Vector3f playerPos = playerController.getPosition();
+        int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
+        int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
+        
+        // Reset frame counter
+        chunksProcessedThisFrame = 0;
+        
+        // Load chunks in a spiral pattern from player outward
+        loadChunksAroundPlayer(playerChunkX, playerChunkZ);
+        
+        // Unload distant chunks to free memory
+        int unloadDistance = (int) (VIEW_DISTANCE * UNLOAD_DISTANCE_MULTIPLIER);
+        world.unloadDistantChunks(playerChunkX, playerChunkZ, unloadDistance);
     }
     
     /**
-     * {@inheritDoc}
+     * Loads chunks around the player with rate limiting.
      */
+    private void loadChunksAroundPlayer(int centerChunkX, int centerChunkZ) {
+        // Load in a spiral pattern (closer chunks first)
+        for (int radius = 0; radius <= VIEW_DISTANCE && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; radius++) {
+            for (int dx = -radius; dx <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dx++) {
+                for (int dz = -radius; dz <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dz++) {
+                    // Only process chunks on the current ring (optimization)
+                    if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) {
+                        continue;
+                    }
+                    
+                    int chunkX = centerChunkX + dx;
+                    int chunkZ = centerChunkZ + dz;
+                    
+                    Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
+                    
+                    // Generate if needed
+                    if (!chunk.isGenerated()) {
+                        world.getGenerator().generateChunk(chunk, world);
+                        chunk.setGenerated(true);
+                        chunksProcessedThisFrame++;
+                    }
+                    
+                    // Build mesh if dirty
+                    if (chunk.isDirty() && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME) {
+                        world.buildChunkMesh(chunk);
+                        chunksProcessedThisFrame++;
+                    }
+                }
+            }
+        }
+    }
+    
     @Override
     public void render(Window window) {
         renderer.prepare(window);
@@ -243,13 +285,14 @@ public class VoxelGame implements IGameLogic {
         Camera camera = playerController.getCamera();
         camera.updateViewMatrix();
         
-        // Bind shader
+        // Bind shader and set uniforms
         shaderProgram.bind();
         shaderProgram.setUniform("projectionMatrix", camera.getProjectionMatrix());
         shaderProgram.setUniform("viewMatrix", camera.getViewMatrix());
         shaderProgram.setUniform("textureSampler", 0);
         shaderProgram.setUniform("useTexture", true);
-        shaderProgram.setUniform("color", new Vector3f(1.0f, 1.0f, 1.0f));
+        shaderProgram.setUniform("lightDirection", LIGHT_DIRECTION);
+        shaderProgram.setUniform("ambientColor", AMBIENT_COLOR);
         
         // Bind texture atlas
         textureAtlas.bind(0);
@@ -263,45 +306,34 @@ public class VoxelGame implements IGameLogic {
         
         // Render visible chunks (frustum culling)
         int renderedChunks = 0;
-        int culledChunks = 0;
         for (Chunk chunk : world.getChunks()) {
             if (chunk.hasMesh()) {
-                // Check if chunk is in view frustum
                 if (frustumCuller.isChunkInFrustum(
                         chunk.getChunkX(), chunk.getChunkZ(),
                         Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
                     chunk.getMesh().render();
                     renderedChunks++;
-                } else {
-                    culledChunks++;
                 }
             }
         }
         
-        // Unbind
+        // Unbind main shader
         textureAtlas.unbind();
         shaderProgram.unbind();
+        
+        // Render block highlight (after main rendering)
+        blockHighlight.render(camera);
     }
     
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void cleanup() {
         Logger.info("Cleaning up Voxel Game...");
         
-        if (world != null) {
-            world.cleanup();
-        }
-        if (shaderProgram != null) {
-            shaderProgram.cleanup();
-        }
-        if (textureAtlas != null) {
-            textureAtlas.cleanup();
-        }
-        if (renderer != null) {
-            renderer.cleanup();
-        }
+        if (blockHighlight != null) blockHighlight.cleanup();
+        if (world != null) world.cleanup();
+        if (shaderProgram != null) shaderProgram.cleanup();
+        if (textureAtlas != null) textureAtlas.cleanup();
+        if (renderer != null) renderer.cleanup();
         
         Logger.info("Voxel Game cleanup complete.");
     }

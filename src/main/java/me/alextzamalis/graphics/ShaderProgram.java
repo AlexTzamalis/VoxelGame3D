@@ -243,6 +243,18 @@ public class ShaderProgram {
     }
     
     /**
+     * Sets a 3-component vector uniform from individual floats.
+     * 
+     * @param uniformName The name of the uniform
+     * @param x The X component
+     * @param y The Y component
+     * @param z The Z component
+     */
+    public void setUniform(String uniformName, float x, float y, float z) {
+        glUniform3f(getUniformLocation(uniformName), x, y, z);
+    }
+    
+    /**
      * Sets a 4-component vector uniform.
      * 
      * @param uniformName The name of the uniform

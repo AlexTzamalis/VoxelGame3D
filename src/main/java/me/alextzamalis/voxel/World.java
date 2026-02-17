@@ -5,9 +5,11 @@ import me.alextzamalis.graphics.TextureAtlas;
 import me.alextzamalis.util.Logger;
 import me.alextzamalis.world.WorldGenerator;
 
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Manages the voxel world including chunks, generation, and block access.
@@ -49,6 +51,9 @@ public class World {
     /** The texture atlas for block textures. */
     private TextureAtlas textureAtlas;
     
+    /** Chunk height constant for external access. */
+    public static final int CHUNK_HEIGHT = Chunk.HEIGHT;
+    
     /**
      * Creates a new world with the specified name and seed.
      * 
@@ -58,7 +63,7 @@ public class World {
     public World(String name, long seed) {
         this.name = name;
         this.seed = seed;
-        this.chunks = new HashMap<>();
+        this.chunks = new ConcurrentHashMap<>(); // Thread-safe for async loading
         this.meshBuilder = new ChunkMeshBuilder();
         this.blockRegistry = BlockRegistry.getInstance();
         
@@ -82,6 +87,15 @@ public class World {
     public void setGenerator(WorldGenerator generator) {
         this.generator = generator;
         Logger.info("Set world generator: %s", generator.getClass().getSimpleName());
+    }
+    
+    /**
+     * Gets the world generator.
+     * 
+     * @return The world generator
+     */
+    public WorldGenerator getGenerator() {
+        return generator;
     }
     
     /**
@@ -177,6 +191,7 @@ public class World {
     
     /**
      * Gets or creates a chunk at the specified coordinates.
+     * Thread-safe for async chunk loading.
      * 
      * @param chunkX Chunk X coordinate
      * @param chunkZ Chunk Z coordinate
@@ -184,15 +199,13 @@ public class World {
      */
     public Chunk getOrCreateChunk(int chunkX, int chunkZ) {
         long key = getChunkKey(chunkX, chunkZ);
-        Chunk chunk = chunks.get(key);
         
-        if (chunk == null) {
-            chunk = new Chunk(chunkX, chunkZ);
-            chunk.setWorld(this);
-            chunks.put(key, chunk);
-        }
-        
-        return chunk;
+        // Use computeIfAbsent for thread-safe creation
+        return chunks.computeIfAbsent(key, k -> {
+            Chunk newChunk = new Chunk(chunkX, chunkZ);
+            newChunk.setWorld(this);
+            return newChunk;
+        });
     }
     
     /**
@@ -326,6 +339,68 @@ public class World {
         int localZ = Chunk.worldToLocalZ(z);
         
         return chunk.getHighestBlock(localX, localZ);
+    }
+    
+    /**
+     * Unloads a chunk by its key.
+     * 
+     * @param key The chunk key
+     * @return true if the chunk was unloaded
+     */
+    public boolean unloadChunk(long key) {
+        Chunk chunk = chunks.remove(key);
+        if (chunk != null) {
+            chunk.cleanup();
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Unloads a chunk at the specified coordinates.
+     * 
+     * @param chunkX Chunk X coordinate
+     * @param chunkZ Chunk Z coordinate
+     * @return true if the chunk was unloaded
+     */
+    public boolean unloadChunk(int chunkX, int chunkZ) {
+        return unloadChunk(getChunkKey(chunkX, chunkZ));
+    }
+    
+    /**
+     * Unloads chunks that are beyond the specified distance from a center point.
+     * 
+     * @param centerChunkX Center chunk X
+     * @param centerChunkZ Center chunk Z
+     * @param maxDistance Maximum distance in chunks
+     * @return Number of chunks unloaded
+     */
+    public int unloadDistantChunks(int centerChunkX, int centerChunkZ, int maxDistance) {
+        int maxDistSq = maxDistance * maxDistance;
+        List<Long> toUnload = new ArrayList<>();
+        
+        for (Chunk chunk : chunks.values()) {
+            int dx = chunk.getChunkX() - centerChunkX;
+            int dz = chunk.getChunkZ() - centerChunkZ;
+            int distSq = dx * dx + dz * dz;
+            
+            if (distSq > maxDistSq) {
+                toUnload.add(getChunkKey(chunk.getChunkX(), chunk.getChunkZ()));
+            }
+        }
+        
+        int unloaded = 0;
+        for (Long key : toUnload) {
+            if (unloadChunk(key)) {
+                unloaded++;
+            }
+        }
+        
+        if (unloaded > 0) {
+            Logger.debug("Unloaded %d distant chunks", unloaded);
+        }
+        
+        return unloaded;
     }
     
     /**
