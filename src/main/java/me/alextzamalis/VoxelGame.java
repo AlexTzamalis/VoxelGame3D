@@ -138,6 +138,15 @@ public class VoxelGame implements IGameLogic {
     /** Frustum culler for visibility testing. */
     private FrustumCuller frustumCuller;
     
+    /** Global buffer manager for MDI rendering. */
+    private me.alextzamalis.graphics.GlobalBufferManager globalBufferManager;
+    
+    /** MDI renderer for efficient chunk rendering. */
+    private me.alextzamalis.graphics.MDIRenderer mdiRenderer;
+    
+    /** Whether to use MDI rendering (can be toggled for testing). */
+    private boolean useMDIRendering = true;
+    
     /** Block interaction handler. */
     private BlockInteraction blockInteraction;
     
@@ -385,10 +394,22 @@ public class VoxelGame implements IGameLogic {
         // Initialize frustum culler
         frustumCuller = new FrustumCuller();
         
+        // Initialize global buffer manager and MDI renderer for Sodium-style rendering
+        if (useMDIRendering) {
+            globalBufferManager = new me.alextzamalis.graphics.GlobalBufferManager();
+            mdiRenderer = new me.alextzamalis.graphics.MDIRenderer(globalBufferManager);
+            Logger.info("MDI rendering enabled - using Multi-Draw Indirect for chunk rendering");
+        }
+        
         // Initialize world with heightmap generator
         world = new World(pendingWorldName, pendingWorldSeed);
         world.setGenerator(new HeightmapGenerator(world.getSeed(), 60, 20, 0.015f));
         world.setTextureAtlas(textureAtlas);
+        
+        // Set global buffer manager in mesh builder if MDI is enabled
+        if (useMDIRendering && globalBufferManager != null) {
+            world.setGlobalBufferManager(globalBufferManager);
+        }
         
         // Initialize async chunk manager (uses all CPU cores for chunk generation)
         int viewDist = getViewDistance();
@@ -433,6 +454,13 @@ public class VoxelGame implements IGameLogic {
             asyncChunkManager.shutdown();
             asyncChunkManager = null;
         }
+        
+        // Cleanup MDI rendering resources
+        if (globalBufferManager != null) {
+            globalBufferManager.cleanup();
+            globalBufferManager = null;
+        }
+        mdiRenderer = null;
         
         if (gameHUD != null) {
             gameHUD.cleanup();
@@ -1013,22 +1041,36 @@ public class VoxelGame implements IGameLogic {
         // Update frustum culler
         frustumCuller.update(camera.getProjectionMatrix(), camera.getViewMatrix());
         
-        // Render visible chunks (using PooledMesh)
-        for (Chunk chunk : world.getChunks()) {
-            // Check for PooledMesh first (new system), then fallback to Mesh (old system)
-            PooledMesh pooledMesh = chunk.getPooledMesh();
-            if (pooledMesh != null && pooledMesh.hasData()) {
-                if (frustumCuller.isChunkInFrustum(
-                        chunk.getChunkX(), chunk.getChunkZ(),
-                        Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
-                    pooledMesh.render();
-                }
-            } else if (chunk.hasMesh()) {
-                // Fallback to old Mesh system for compatibility
-                if (frustumCuller.isChunkInFrustum(
-                        chunk.getChunkX(), chunk.getChunkZ(),
-                        Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
-                    chunk.getMesh().render();
+        // Render visible chunks using MDI if enabled, otherwise fallback to per-chunk rendering
+        if (useMDIRendering && mdiRenderer != null && globalBufferManager != null) {
+            // Prepare MDI renderer with visible chunks
+            mdiRenderer.prepareFrame(world.getChunks(), frustumCuller);
+            
+            // Build indirect draw commands
+            int commandCount = mdiRenderer.buildIndirectCommands();
+            
+            if (commandCount > 0) {
+                // Single draw call for all chunks!
+                mdiRenderer.render(commandCount);
+            }
+        } else {
+            // Fallback to per-chunk rendering (old system)
+            for (Chunk chunk : world.getChunks()) {
+                // Check for PooledMesh first (new system), then fallback to Mesh (old system)
+                PooledMesh pooledMesh = chunk.getPooledMesh();
+                if (pooledMesh != null && pooledMesh.hasData()) {
+                    if (frustumCuller.isChunkInFrustum(
+                            chunk.getChunkX(), chunk.getChunkZ(),
+                            Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
+                        pooledMesh.render();
+                    }
+                } else if (chunk.hasMesh()) {
+                    // Fallback to old Mesh system for compatibility
+                    if (frustumCuller.isChunkInFrustum(
+                            chunk.getChunkX(), chunk.getChunkZ(),
+                            Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
+                        chunk.getMesh().render();
+                    }
                 }
             }
         }

@@ -39,8 +39,8 @@ import static org.lwjgl.opengl.GL43.*;
  */
 public class GlobalBufferManager {
     
-    /** Initial vertex buffer size (in integers, ~4MB for 1M vertices). */
-    private static final int INITIAL_VERTEX_BUFFER_SIZE = 1_000_000 * 2; // 2 ints per vertex
+    /** Initial vertex buffer size (in integers, ~16MB for 1M vertices). */
+    private static final int INITIAL_VERTEX_BUFFER_SIZE = 1_000_000 * 4; // 4 ints per vertex (pos, UV, normal, light)
     
     /** Initial index buffer size (in integers, ~16MB for 4M indices). */
     private static final int INITIAL_INDEX_BUFFER_SIZE = 4_000_000;
@@ -129,22 +129,22 @@ public class GlobalBufferManager {
         glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
         glBufferData(GL_ARRAY_BUFFER, (long) vertexBufferCapacity * Integer.BYTES, GL_DYNAMIC_DRAW);
         
-        // Set up vertex attributes for packed data
-        // Attribute 0: Position (packed into 2 ints, but we'll use 1 for now)
+        // Set up vertex attributes for packed data (4 ints per vertex, 16 bytes)
+        // Attribute 0: Position (packed x,y,z in 1 int)
         glEnableVertexAttribArray(0);
-        glVertexAttribIPointer(0, 1, GL_INT, 0, 0); // Position packed as int
+        glVertexAttribIPointer(0, 1, GL_INT, 16, 0); // Stride 16 bytes, offset 0
         
-        // Attribute 1: UV (packed as int)
+        // Attribute 1: UV (packed u,v in 1 int)
         glEnableVertexAttribArray(1);
-        glVertexAttribIPointer(1, 1, GL_INT, 0, 4); // Offset by 4 bytes (1 int)
+        glVertexAttribIPointer(1, 1, GL_INT, 16, 4); // Stride 16 bytes, offset 4 bytes
         
-        // Attribute 2: Normal (packed as int)
+        // Attribute 2: Normal (packed nx,ny,nz in 1 int)
         glEnableVertexAttribArray(2);
-        glVertexAttribIPointer(2, 1, GL_INT, 0, 8); // Offset by 8 bytes (2 ints)
+        glVertexAttribIPointer(2, 1, GL_INT, 16, 8); // Stride 16 bytes, offset 8 bytes
         
-        // Attribute 3: Light (packed as int, but only uses 1 byte)
+        // Attribute 3: Light (packed blockLight,skyLight in 1 int)
         glEnableVertexAttribArray(3);
-        glVertexAttribIPointer(3, 1, GL_INT, 0, 12); // Offset by 12 bytes (3 ints)
+        glVertexAttribIPointer(3, 1, GL_INT, 16, 12); // Stride 16 bytes, offset 12 bytes
         
         // Create index buffer
         indexBufferId = glGenBuffers();
@@ -174,7 +174,7 @@ public class GlobalBufferManager {
      */
     public ChunkAllocation allocateChunk(long chunkKey, int vertexCount, int indexCount) {
         // Calculate required space
-        int requiredVertexSpace = vertexCount * 2; // 2 ints per vertex (position + UV/normal/light)
+        int requiredVertexSpace = vertexCount * 4; // 4 ints per vertex (position, UV, normal, light)
         int requiredIndexSpace = indexCount;
         
         // Check if we need to expand buffers
@@ -225,7 +225,7 @@ public class GlobalBufferManager {
         // Update index data (need to adjust indices for global buffer offset)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferId);
         int[] adjustedIndices = new int[indices.length];
-        int baseVertex = alloc.vertexOffset / 2; // Convert from packed ints to vertex count
+        int baseVertex = alloc.vertexOffset / 4; // Convert from packed ints to vertex count (4 ints per vertex)
         for (int i = 0; i < indices.length; i++) {
             adjustedIndices[i] = indices[i] + baseVertex;
         }
@@ -280,10 +280,10 @@ public class GlobalBufferManager {
         // Rebind to VAO
         glBindVertexArray(vaoId);
         glBindBuffer(GL_ARRAY_BUFFER, vertexBufferId);
-        glVertexAttribIPointer(0, 1, GL_INT, 0, 0);
-        glVertexAttribIPointer(1, 1, GL_INT, 0, 4);
-        glVertexAttribIPointer(2, 1, GL_INT, 0, 8);
-        glVertexAttribIPointer(3, 1, GL_INT, 0, 12);
+        glVertexAttribIPointer(0, 1, GL_INT, 16, 0);  // Stride 16 bytes, offset 0
+        glVertexAttribIPointer(1, 1, GL_INT, 16, 4);  // Stride 16 bytes, offset 4
+        glVertexAttribIPointer(2, 1, GL_INT, 16, 8);  // Stride 16 bytes, offset 8
+        glVertexAttribIPointer(3, 1, GL_INT, 16, 12); // Stride 16 bytes, offset 12
         glBindVertexArray(0);
         
         glBindBuffer(GL_COPY_READ_BUFFER, 0);

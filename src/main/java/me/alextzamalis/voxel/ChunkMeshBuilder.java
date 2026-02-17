@@ -71,6 +71,9 @@ public class ChunkMeshBuilder {
     /** The texture atlas for UV lookups. */
     private TextureAtlas textureAtlas;
     
+    /** The global buffer manager for MDI rendering (optional). */
+    private me.alextzamalis.graphics.GlobalBufferManager globalBufferManager;
+    
     // Pre-allocated temporary arrays to avoid allocations in hot path
     private final float[] tempVertices = new float[12]; // 4 vertices * 3 components
     private final float[] tempUVs = new float[8];       // 4 vertices * 2 components
@@ -102,6 +105,24 @@ public class ChunkMeshBuilder {
      */
     public void setTextureAtlas(TextureAtlas atlas) {
         this.textureAtlas = atlas;
+    }
+    
+    /**
+     * Sets the global buffer manager for MDI rendering.
+     * 
+     * @param bufferManager The global buffer manager
+     */
+    public void setGlobalBufferManager(me.alextzamalis.graphics.GlobalBufferManager bufferManager) {
+        this.globalBufferManager = bufferManager;
+    }
+    
+    /**
+     * Gets the global buffer manager.
+     * 
+     * @return The global buffer manager, or null if not set
+     */
+    public me.alextzamalis.graphics.GlobalBufferManager getGlobalBufferManager() {
+        return globalBufferManager;
     }
     
     /**
@@ -243,6 +264,115 @@ public class ChunkMeshBuilder {
         pooledMesh.updateData(finalPositions, finalTexCoords, finalNormals, finalTints, finalIndices);
         
         return pooledMesh;
+    }
+    
+    /**
+     * Builds mesh data into the global buffer using packed vertices for MDI rendering.
+     * 
+     * <p>This method packs vertex data using VertexPacker and allocates space in the
+     * GlobalBufferManager, enabling Multi-Draw Indirect rendering.
+     * 
+     * @param chunk The chunk to build a mesh for
+     * @param chunkKey Unique chunk identifier for buffer allocation
+     * @return true if mesh was successfully built, false otherwise
+     */
+    public boolean buildGlobalBufferMesh(Chunk chunk, long chunkKey) {
+        if (globalBufferManager == null) {
+            me.alextzamalis.util.Logger.warn("GlobalBufferManager not set, cannot build MDI mesh");
+            return false;
+        }
+        
+        // Reset indices
+        posIndex = 0;
+        texIndex = 0;
+        normIndex = 0;
+        tintIndex = 0;
+        indIndex = 0;
+        vertexCount = 0;
+        
+        // Iterate through all blocks in the chunk
+        for (int y = 0; y < Chunk.HEIGHT; y++) {
+            for (int z = 0; z < Chunk.DEPTH; z++) {
+                for (int x = 0; x < Chunk.WIDTH; x++) {
+                    int blockId = chunk.getBlock(x, y, z);
+                    
+                    // Skip air blocks
+                    if (blockId == 0) {
+                        continue;
+                    }
+                    
+                    Block block = blockRegistry.getBlock(blockId);
+                    if (block == null || block.isAir()) {
+                        continue;
+                    }
+                    
+                    // Calculate world position for this block
+                    float worldX = chunk.getWorldX(x);
+                    float worldZ = chunk.getWorldZ(z);
+                    
+                    // Check each face for visibility
+                    addVisibleFaces(chunk, x, y, z, worldX, y, worldZ, block);
+                }
+            }
+        }
+        
+        // Return false if no faces were generated
+        if (posIndex == 0) {
+            return false;
+        }
+        
+        // Calculate vertex count (positions are 3 floats per vertex)
+        int vertexCount = posIndex / 3;
+        int indexCount = indIndex;
+        
+        // Allocate space in global buffer
+        me.alextzamalis.graphics.GlobalBufferManager.ChunkAllocation alloc = 
+            globalBufferManager.allocateChunk(chunkKey, vertexCount, indexCount);
+        
+        if (alloc == null) {
+            me.alextzamalis.util.Logger.warn("Failed to allocate buffer space for chunk %d", chunkKey);
+            return false;
+        }
+        
+        // Pack vertices into integers (4 ints per vertex)
+        int[] packedVertices = new int[vertexCount * 4];
+        int packedIndex = 0;
+        
+        for (int i = 0; i < vertexCount; i++) {
+            int posIdx = i * 3;
+            int texIdx = i * 2;
+            int normIdx = i * 3;
+            
+            // Pack position (x, y, z into 1 int)
+            int[] posPacked = me.alextzamalis.graphics.VertexPacker.packPosition(
+                positions[posIdx], positions[posIdx + 1], positions[posIdx + 2]);
+            
+            // Pack UV (u, v into 1 int)
+            int uvPacked = me.alextzamalis.graphics.VertexPacker.packUV(
+                texCoords[texIdx], texCoords[texIdx + 1]);
+            
+            // Pack normal (nx, ny, nz into 1 int)
+            int normalPacked = me.alextzamalis.graphics.VertexPacker.packNormal(
+                normals[normIdx], normals[normIdx + 1], normals[normIdx + 2]);
+            
+            // Pack light (using default values for now - TODO: get actual light values from chunk)
+            int lightPacked = me.alextzamalis.graphics.VertexPacker.packLight(15, 15);
+            
+            // Store packed data: 4 ints per vertex
+            packedVertices[packedIndex++] = posPacked[0]; // Position (packed x,y,z)
+            packedVertices[packedIndex++] = uvPacked;     // UV (packed u,v)
+            packedVertices[packedIndex++] = normalPacked; // Normal (packed nx,ny,nz)
+            packedVertices[packedIndex++] = lightPacked;  // Light (packed blockLight,skyLight)
+        }
+        
+        // Create trimmed index array
+        int[] finalIndices = new int[indexCount];
+        System.arraycopy(indices, 0, finalIndices, 0, indexCount);
+        
+        // Update global buffer
+        globalBufferManager.updateChunk(chunkKey, packedVertices, finalIndices);
+        
+        return true;
     }
     
     /**

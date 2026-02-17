@@ -1,10 +1,10 @@
 #version 430 core
 
-// Packed vertex attributes (as integers)
-layout (location = 0) in int aPositionPacked;    // Position packed as int
-layout (location = 1) in int aUVPacked;           // UV packed as int
-layout (location = 2) in int aNormalPacked;      // Normal packed as int
-layout (location = 3) in int aLightPacked;       // Light packed as int
+// Packed vertex attributes (as integers, 4 ints per vertex, 16 bytes stride)
+layout (location = 0) in int aPositionPacked;    // Position packed as int (offset 0)
+layout (location = 1) in int aUVPacked;          // UV packed as int (offset 4)
+layout (location = 2) in int aNormalPacked;     // Normal packed as int (offset 8)
+layout (location = 3) in int aLightPacked;       // Light packed as int (offset 12)
 
 // Output to fragment shader
 out vec3 fragPos;
