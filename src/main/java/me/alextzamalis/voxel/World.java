@@ -175,7 +175,10 @@ public class World {
         
         chunk.setBlock(localX, y, localZ, blockId);
         
-        // Mark adjacent chunks as dirty if block is on edge
+        // CRITICAL: Mark the current chunk as dirty (it was missing!)
+        markChunkDirty(chunkX, chunkZ);
+        
+        // Mark adjacent chunks as dirty if block is on edge (for face culling)
         if (localX == 0) markChunkDirty(chunkX - 1, chunkZ);
         if (localX == Chunk.WIDTH - 1) markChunkDirty(chunkX + 1, chunkZ);
         if (localZ == 0) markChunkDirty(chunkX, chunkZ - 1);
