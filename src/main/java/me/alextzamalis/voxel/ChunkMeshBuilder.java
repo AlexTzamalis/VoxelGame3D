@@ -4,6 +4,7 @@ import me.alextzamalis.graphics.Mesh;
 import me.alextzamalis.graphics.MeshPool;
 import me.alextzamalis.graphics.PooledMesh;
 import me.alextzamalis.graphics.TextureAtlas;
+import me.alextzamalis.util.Logger;
 
 /**
  * Builds optimized meshes for chunks using face culling and texture atlas.
@@ -218,6 +219,11 @@ public class ChunkMeshBuilder {
         // Acquire a pooled mesh if needed
         if (pooledMesh == null) {
             pooledMesh = MeshPool.getInstance().acquire();
+            if (pooledMesh == null) {
+                // Pool is exhausted, cannot build mesh right now
+                Logger.warn("Cannot build chunk mesh: MeshPool exhausted. Retry later.");
+                return null;
+            }
         }
         
         // Create trimmed arrays for the mesh data

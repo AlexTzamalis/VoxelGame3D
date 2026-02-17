@@ -306,7 +306,7 @@ public class GameEngine implements Runnable {
      * Processes input events.
      */
     private void input() {
-        inputManager.update();
+        inputManager.update(window);
         gameLogic.input(window, inputManager);
     }
     

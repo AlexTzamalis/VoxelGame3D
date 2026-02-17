@@ -30,8 +30,8 @@ public class MeshPool {
     /** Default initial pool size. */
     private static final int DEFAULT_INITIAL_SIZE = 64;
     
-    /** Maximum pool size to prevent unbounded growth. */
-    private static final int MAX_POOL_SIZE = 512;
+    /** Maximum pool size to prevent unbounded growth. Increased for better performance. */
+    private static final int MAX_POOL_SIZE = 1024;
     
     /** Default vertex capacity for pooled meshes. */
     private static final int DEFAULT_MESH_CAPACITY = 8192;
@@ -125,10 +125,12 @@ public class MeshPool {
                 mesh = createNewMesh();
                 Logger.debug("MeshPool: Created new mesh (total: %d)", allMeshes.size());
             } else {
-                // Pool is at max size, wait for a mesh to be released
-                Logger.warn("MeshPool at max capacity (%d), waiting for release", MAX_POOL_SIZE);
-                // In a real scenario, we might want to handle this differently
-                mesh = createNewMesh();
+                // Pool is at max size - don't create more, wait briefly and try again
+                // This prevents unbounded growth and GPU memory exhaustion
+                Logger.warn("MeshPool at max capacity (%d), cannot create more meshes. Available: %d, In use: %d", 
+                           MAX_POOL_SIZE, availableMeshes.size(), allMeshes.size() - availableMeshes.size());
+                // Return null to indicate failure - caller should retry later
+                return null;
             }
         } else {
             mesh = availableMeshes.pop();

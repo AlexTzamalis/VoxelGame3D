@@ -4,6 +4,7 @@ import me.alextzamalis.core.Window;
 import me.alextzamalis.graphics.Camera;
 import me.alextzamalis.input.InputManager;
 import me.alextzamalis.physics.PlayerPhysics;
+import me.alextzamalis.util.Logger;
 import me.alextzamalis.voxel.World;
 import org.joml.Vector3f;
 
@@ -80,6 +81,9 @@ public class PlayerController {
     /** Flag to track if F3 was pressed last frame (game mode toggle). */
     private boolean f3WasPressed;
     
+    /** Flag to track if Space was pressed last frame (for jump). */
+    private boolean spaceWasPressed;
+    
     /**
      * Creates a new player controller with default settings.
      */
@@ -93,6 +97,7 @@ public class PlayerController {
         this.leftMouseWasPressed = false;
         this.escapeWasPressed = false;
         this.f3WasPressed = false;
+        this.spaceWasPressed = false;
         
         updatePhysicsForGameMode();
     }
@@ -112,6 +117,7 @@ public class PlayerController {
         this.leftMouseWasPressed = false;
         this.escapeWasPressed = false;
         this.f3WasPressed = false;
+        this.spaceWasPressed = false;
         
         updatePhysicsForGameMode();
     }
@@ -180,6 +186,15 @@ public class PlayerController {
      * @param inputManager The input manager
      */
     public void update(float deltaTime, InputManager inputManager) {
+        if (inputManager == null) {
+            return; // Can't update without input manager
+        }
+        
+        // Ensure deltaTime is reasonable (prevent division by zero or huge values)
+        if (deltaTime <= 0 || deltaTime > 1.0f) {
+            deltaTime = 0.016f; // Default to ~60fps if invalid
+        }
+        
         // Check sprint
         sprinting = inputManager.isKeyPressed(GLFW_KEY_LEFT_CONTROL);
         float currentSpeed = (gameMode == GameMode.CREATIVE ? CREATIVE_FLY_SPEED : movementSpeed);
@@ -188,22 +203,33 @@ public class PlayerController {
         // Calculate movement direction
         float dx = 0, dz = 0;
         
-        if (inputManager.isKeyPressed(GLFW_KEY_W)) {
-            Vector3f forward = camera.getForward();
-            dx -= forward.x * speed;
-            dz -= forward.z * speed;
+        boolean wPressed = inputManager.isKeyPressed(GLFW_KEY_W);
+        boolean sPressed = inputManager.isKeyPressed(GLFW_KEY_S);
+        boolean aPressed = inputManager.isKeyPressed(GLFW_KEY_A);
+        boolean dPressed = inputManager.isKeyPressed(GLFW_KEY_D);
+        
+        // Debug: Log if keys are pressed (only occasionally to avoid spam)
+        if ((wPressed || sPressed || aPressed || dPressed) && Math.random() < 0.01) {
+            Logger.debug("Movement keys: W=%s S=%s A=%s D=%s, speed=%.2f, deltaTime=%.4f", 
+                        wPressed, sPressed, aPressed, dPressed, speed, deltaTime);
         }
-        if (inputManager.isKeyPressed(GLFW_KEY_S)) {
+        
+        if (wPressed) {
             Vector3f forward = camera.getForward();
-            dx += forward.x * speed;
-            dz += forward.z * speed;
+            dx += forward.x * speed;  // Fixed: was -=, should be +
+            dz += forward.z * speed;  // Fixed: was -=, should be +
         }
-        if (inputManager.isKeyPressed(GLFW_KEY_A)) {
+        if (sPressed) {
+            Vector3f forward = camera.getForward();
+            dx -= forward.x * speed;  // Fixed: was +=, should be -
+            dz -= forward.z * speed;  // Fixed: was +=, should be -
+        }
+        if (aPressed) {
             Vector3f right = camera.getRight();
             dx -= right.x * speed;
             dz -= right.z * speed;
         }
-        if (inputManager.isKeyPressed(GLFW_KEY_D)) {
+        if (dPressed) {
             Vector3f right = camera.getRight();
             dx += right.x * speed;
             dz += right.z * speed;
@@ -227,10 +253,12 @@ public class PlayerController {
                 camera.move(0, -speed, 0);
             }
         } else {
-            // Survival mode - jumping only when on ground
-            if (inputManager.isKeyPressed(GLFW_KEY_SPACE)) {
+            // Survival mode - jumping only when on ground and key just pressed
+            boolean spacePressed = inputManager.isKeyPressed(GLFW_KEY_SPACE);
+            if (spacePressed && !spaceWasPressed && physics.isOnGround()) {
                 physics.jump();
             }
+            spaceWasPressed = spacePressed;
         }
         
         // Apply physics (gravity, collision)
@@ -238,8 +266,13 @@ public class PlayerController {
         
         // Camera rotation with mouse (when cursor is grabbed)
         if (inputManager.isCursorGrabbed()) {
-            float rotX = (float) inputManager.getDeltaY() * mouseSensitivity;
-            float rotY = (float) inputManager.getDeltaX() * mouseSensitivity;
+            double deltaX = inputManager.getDeltaX();
+            double deltaY = inputManager.getDeltaY();
+            
+            // Apply rotation directly (no momentum, immediate response)
+            // Invert Y axis for natural mouse look (up = look up, down = look down)
+            float rotX = (float) -deltaY * mouseSensitivity;  // Inverted Y
+            float rotY = (float) deltaX * mouseSensitivity;    // Normal X
             camera.rotate(rotX, rotY, 0);
         }
     }

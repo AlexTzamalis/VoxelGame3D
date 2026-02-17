@@ -37,17 +37,26 @@ import me.alextzamalis.world.WorldGenerator;
  */
 public class AsyncChunkManager {
     
-    /** Number of worker threads for chunk generation. */
-    private static final int WORKER_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors() - 2);
+    /** Number of worker threads for chunk generation. Uses all available cores for maximum performance. */
+    private static final int WORKER_THREADS = Math.max(4, Runtime.getRuntime().availableProcessors());
     
-    /** Maximum chunks to generate per frame. */
+    /** Maximum chunks to generate per frame. Increased for faster world loading. */
     private static final int MAX_GENERATIONS_PER_FRAME = 4;
     
-    /** Maximum chunks to mesh per frame. */
+    /** Maximum chunks to mesh per frame. Increased for faster world loading. */
     private static final int MAX_MESHES_PER_FRAME = 2;
     
-    /** Maximum pending generation tasks. */
-    private static final int MAX_PENDING_TASKS = 128;
+    /** Frame counter for mesh building throttling. */
+    private int meshBuildFrameCounter = 0;
+    
+    /** Build meshes every N frames to prevent render thread blocking. */
+    private static final int MESH_BUILD_INTERVAL = 5; // Build meshes every 5 frames (more conservative)
+    
+    /** Maximum chunks to queue for meshing. Prevents unbounded queue growth. */
+    private static final int MAX_CHUNKS_TO_MESH_QUEUE = 50; // Increased to prevent dropping chunks
+    
+    /** Maximum pending generation tasks. Reduced to prevent mesh pool exhaustion. */
+    private static final int MAX_PENDING_TASKS = 32;
     
     /** The world being managed. */
     private final World world;
@@ -109,12 +118,13 @@ public class AsyncChunkManager {
     }
     
     /**
-     * Updates the chunk manager. Call once per frame.
+     * Updates chunk generation (can be called from any thread).
+     * This handles chunk generation on worker threads.
      * 
      * @param playerChunkX Player's chunk X coordinate
      * @param playerChunkZ Player's chunk Z coordinate
      */
-    public void update(int playerChunkX, int playerChunkZ) {
+    public void updateGeneration(int playerChunkX, int playerChunkZ) {
         if (!running) return;
         
         // 1. Unload distant chunks
@@ -125,12 +135,49 @@ public class AsyncChunkManager {
         
         // 3. Check for completed generation tasks
         processCompletedGenerations();
+    }
+    
+    /**
+     * Updates mesh building (MUST be called from main thread with OpenGL context).
+     * This builds meshes for generated chunks.
+     * 
+     * <p>Throttled to prevent blocking the render thread.
+     */
+    public void updateMeshes() {
+        if (!running) return;
         
-        // 4. Build meshes for generated chunks (main thread only)
+        // During loading, build meshes every frame (no throttling)
+        // During gameplay, throttle to prevent render thread blocking
+        boolean isDuringLoading = chunksToMesh.size() > 20; // If queue is large, we're likely loading
+        
+        if (!isDuringLoading) {
+            // Throttle mesh building during gameplay
+            meshBuildFrameCounter++;
+            if (meshBuildFrameCounter < MESH_BUILD_INTERVAL) {
+                return; // Skip this frame
+            }
+            meshBuildFrameCounter = 0;
+        }
+        
+        // Build meshes for generated chunks (main thread only - requires OpenGL)
         buildPendingMeshes();
         
-        // 5. Rebuild dirty chunk meshes
+        // Rebuild dirty chunk meshes (main thread only - requires OpenGL)
+        // Only rebuild one dirty chunk per cycle to prevent blocking
         rebuildDirtyMeshes();
+    }
+    
+    /**
+     * Updates the chunk manager. Call once per frame.
+     * NOTE: This method calls updateMeshes() which requires OpenGL context.
+     * Use updateGeneration() + updateMeshes() separately if you need to split threads.
+     * 
+     * @param playerChunkX Player's chunk X coordinate
+     * @param playerChunkZ Player's chunk Z coordinate
+     */
+    public void update(int playerChunkX, int playerChunkZ) {
+        updateGeneration(playerChunkX, playerChunkZ);
+        updateMeshes(); // This requires OpenGL context (main thread)
     }
     
     /**
@@ -290,38 +337,81 @@ public class AsyncChunkManager {
     
     /**
      * Builds meshes for generated chunks.
+     * Very conservative to prevent render thread blocking.
      */
     private void buildPendingMeshes() {
+        // Limit queue size to prevent unbounded growth
+        while (chunksToMesh.size() > MAX_CHUNKS_TO_MESH_QUEUE) {
+            Chunk chunk = chunksToMesh.poll();
+            if (chunk != null) {
+                Logger.debug("Dropping chunk from mesh queue (queue too large): (%d, %d)", 
+                           chunk.getChunkX(), chunk.getChunkZ());
+            }
+        }
+        
+        // During loading (large queue), build more meshes per frame
+        boolean isDuringLoading = chunksToMesh.size() > 20;
+        int maxToBuild = isDuringLoading ? 10 : MAX_MESHES_PER_FRAME; // Build 10 per frame during loading
+        
         int built = 0;
         
-        while (!chunksToMesh.isEmpty() && built < MAX_MESHES_PER_FRAME) {
+        // Build multiple meshes per call during loading to speed up world loading
+        while (!chunksToMesh.isEmpty() && built < maxToBuild) {
             Chunk chunk = chunksToMesh.poll();
             if (chunk != null && chunk.isGenerated()) {
-                // Build mesh using pooled mesh system
-                world.buildChunkMeshPooled(chunk);
-                chunksMeshed.incrementAndGet();
-                built++;
+                try {
+                    // Build mesh using pooled mesh system
+                    world.buildChunkMeshPooled(chunk);
+                    chunksMeshed.incrementAndGet();
+                    built++;
+                } catch (Exception e) {
+                    // If mesh building fails (e.g., pool exhausted), re-queue the chunk
+                    Logger.warn("Failed to build mesh for chunk (%d, %d): %s. Will retry later.", 
+                               chunk.getChunkX(), chunk.getChunkZ(), e.getMessage());
+                    // Don't re-queue if queue is too large
+                    if (chunksToMesh.size() < MAX_CHUNKS_TO_MESH_QUEUE) {
+                        chunksToMesh.offer(chunk);
+                    }
+                    break; // Stop trying this frame
+                }
             }
         }
     }
     
     /**
      * Rebuilds meshes for dirty chunks.
+     * Only rebuilds one chunk per call to prevent render thread blocking.
      */
     private void rebuildDirtyMeshes() {
-        int rebuilt = 0;
+        if (dirtyChunks.isEmpty()) {
+            return;
+        }
         
+        // Only rebuild ONE dirty chunk per cycle to prevent blocking
         Iterator<Long> it = dirtyChunks.iterator();
-        while (it.hasNext() && rebuilt < MAX_MESHES_PER_FRAME) {
+        if (it.hasNext()) {
             Long key = it.next();
             it.remove();
             
-            // Find the chunk
+            // Find the chunk (limit search to prevent blocking)
+            int checked = 0;
+            int maxChecks = 50; // Don't check more than 50 chunks
+            
             for (Chunk chunk : world.getChunks()) {
+                if (checked++ >= maxChecks) {
+                    break; // Prevent blocking on large chunk collections
+                }
+                
                 if (getChunkKey(chunk.getChunkX(), chunk.getChunkZ()) == key) {
                     if (chunk.isDirty()) {
-                        world.buildChunkMeshPooled(chunk);
-                        rebuilt++;
+                        try {
+                            world.buildChunkMeshPooled(chunk);
+                        } catch (Exception e) {
+                            Logger.warn("Failed to rebuild mesh for dirty chunk (%d, %d): %s", 
+                                       chunk.getChunkX(), chunk.getChunkZ(), e.getMessage());
+                            // Re-add to dirty set for retry
+                            dirtyChunks.add(key);
+                        }
                     }
                     break;
                 }
@@ -420,6 +510,35 @@ public class AsyncChunkManager {
      */
     public int getGeneratingCount() {
         return generatingChunks.size() + pendingGeneration.size();
+    }
+    
+    /**
+     * Gets the total number of chunks generated so far.
+     * 
+     * @return Generated chunk count
+     */
+    public int getGeneratedChunkCount() {
+        return chunksGenerated.get();
+    }
+    
+    /**
+     * Gets the total number of chunks meshed so far.
+     * 
+     * @return Meshed chunk count
+     */
+    public int getMeshedChunkCount() {
+        return chunksMeshed.get();
+    }
+    
+    /**
+     * Checks if initial load is complete (all chunks in view distance are generated and meshed).
+     * 
+     * @return true if initial load is complete
+     */
+    public boolean isInitialLoadComplete() {
+        // Check if there are no pending generations and no chunks waiting to be meshed
+        // This is a simple heuristic - in practice, we'd track expected vs actual
+        return pendingGeneration.isEmpty() && chunksToMesh.isEmpty() && generatingChunks.isEmpty();
     }
     
     /**

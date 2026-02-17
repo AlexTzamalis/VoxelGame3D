@@ -1,12 +1,24 @@
 package me.alextzamalis.input;
 
-import me.alextzamalis.core.Window;
+import static org.lwjgl.glfw.GLFW.GLFW_CURSOR;
+import static org.lwjgl.glfw.GLFW.GLFW_CURSOR_DISABLED;
+import static org.lwjgl.glfw.GLFW.GLFW_CURSOR_NORMAL;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_LAST;
+import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LAST;
+import static org.lwjgl.glfw.GLFW.GLFW_RELEASE;
+import static org.lwjgl.glfw.GLFW.glfwSetCursorEnterCallback;
+import static org.lwjgl.glfw.GLFW.glfwSetCursorPos;
+import static org.lwjgl.glfw.GLFW.glfwSetCursorPosCallback;
+import static org.lwjgl.glfw.GLFW.glfwSetInputMode;
+import static org.lwjgl.glfw.GLFW.glfwSetKeyCallback;
+import static org.lwjgl.glfw.GLFW.glfwSetMouseButtonCallback;
+import static org.lwjgl.glfw.GLFW.glfwSetScrollCallback;
 import org.lwjgl.glfw.GLFWCursorPosCallback;
 import org.lwjgl.glfw.GLFWKeyCallback;
 import org.lwjgl.glfw.GLFWMouseButtonCallback;
 import org.lwjgl.glfw.GLFWScrollCallback;
 
-import static org.lwjgl.glfw.GLFW.*;
+import me.alextzamalis.core.Window;
 
 /**
  * Manages all input from keyboard and mouse.
@@ -71,6 +83,9 @@ public class InputManager {
     /** GLFW scroll callback. */
     private GLFWScrollCallback scrollCallback;
     
+    /** Flag to ignore cursor position updates when we're resetting the cursor. */
+    private boolean ignoreNextCursorUpdate = false;
+    
     /**
      * Creates a new input manager.
      */
@@ -113,6 +128,11 @@ public class InputManager {
         cursorPosCallback = new GLFWCursorPosCallback() {
             @Override
             public void invoke(long window, double xpos, double ypos) {
+                // Ignore cursor updates when we're resetting the cursor to center
+                if (ignoreNextCursorUpdate) {
+                    ignoreNextCursorUpdate = false;
+                    return;
+                }
                 mouseX = xpos;
                 mouseY = ypos;
             }
@@ -150,13 +170,36 @@ public class InputManager {
      * 
      * <p>This method calculates mouse deltas and should be called
      * once per frame before processing input.
+     * 
+     * @param window The window (needed for cursor centering when grabbed)
      */
-    public void update() {
-        // Calculate mouse delta
-        deltaX = mouseX - previousMouseX;
-        deltaY = mouseY - previousMouseY;
-        previousMouseX = mouseX;
-        previousMouseY = mouseY;
+    public void update(Window window) {
+        if (cursorGrabbed && window != null) {
+            // When cursor is grabbed, calculate delta from previous position first
+            // This captures the movement before we reset the cursor
+            deltaX = mouseX - previousMouseX;
+            deltaY = mouseY - previousMouseY;
+            
+            // Then reset cursor to center for next frame
+            double centerX = window.getWidth() / 2.0;
+            double centerY = window.getHeight() / 2.0;
+            
+            // Set flag to ignore the callback that will fire from glfwSetCursorPos
+            ignoreNextCursorUpdate = true;
+            glfwSetCursorPos(windowHandle, centerX, centerY);
+            
+            // Immediately update positions to center (don't wait for callback)
+            mouseX = centerX;
+            mouseY = centerY;
+            previousMouseX = centerX;
+            previousMouseY = centerY;
+        } else {
+            // Normal mode - calculate delta from previous position
+            deltaX = mouseX - previousMouseX;
+            deltaY = mouseY - previousMouseY;
+            previousMouseX = mouseX;
+            previousMouseY = mouseY;
+        }
     }
     
     /**
