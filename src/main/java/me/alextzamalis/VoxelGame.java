@@ -52,17 +52,20 @@ import static org.lwjgl.glfw.GLFW.*;
  */
 public class VoxelGame implements IGameLogic {
     
-    /** View distance in chunks. */
-    private static final int VIEW_DISTANCE = 3;
+    /** Default view distance in chunks (used if settings not loaded). */
+    private static final int DEFAULT_VIEW_DISTANCE = 3;
     
     /** Unload distance multiplier (chunks beyond VIEW_DISTANCE * this are unloaded). */
     private static final float UNLOAD_DISTANCE_MULTIPLIER = 1.5f;
     
-    /** Maximum chunks to generate per frame (prevents frame drops). */
-    private static final int MAX_CHUNKS_PER_FRAME = 1;
+    /** Settings manager for configurable settings. */
+    private me.alextzamalis.config.SettingsManager settingsManager;
     
-    /** Maximum chunk meshes to build per frame. */
-    private static final int MAX_MESHES_PER_FRAME = 1;
+    /** Default max chunks per frame (used if settings not loaded). */
+    private static final int DEFAULT_MAX_CHUNKS_PER_FRAME = 1;
+    
+    /** Default max meshes per frame (used if settings not loaded). */
+    private static final int DEFAULT_MAX_MESHES_PER_FRAME = 1;
     
     /** Spiral index for chunk loading (tracks where we left off). */
     private int chunkLoadSpiralIndex = 0;
@@ -173,6 +176,9 @@ public class VoxelGame implements IGameLogic {
         Logger.info("Initializing Voxel Game...");
         this.windowRef = window;
         
+        // Initialize settings manager
+        settingsManager = me.alextzamalis.config.SettingsManager.getInstance();
+        
         // Initialize renderer
         renderer = new Renderer();
         renderer.init();
@@ -275,7 +281,8 @@ public class VoxelGame implements IGameLogic {
         loadingScreen.setStatusMessage("Preparing world...");
         
         // Calculate total chunks to load
-        int diameter = VIEW_DISTANCE * 2 + 1;
+        int viewDist = getViewDistance();
+        int diameter = viewDist * 2 + 1;
         loadingChunksTotal = diameter * diameter;
         loadingChunksCompleted = 0;
         
@@ -663,7 +670,8 @@ public class VoxelGame implements IGameLogic {
         loadChunksAroundPlayer(playerChunkX, playerChunkZ);
         
         // Unload distant chunks
-        int unloadDistance = (int) (VIEW_DISTANCE * UNLOAD_DISTANCE_MULTIPLIER);
+        int viewDist = getViewDistance();
+        int unloadDistance = (int) (viewDist * UNLOAD_DISTANCE_MULTIPLIER);
         world.unloadDistantChunks(playerChunkX, playerChunkZ, unloadDistance);
     }
     
@@ -680,25 +688,29 @@ public class VoxelGame implements IGameLogic {
             lastPlayerChunkZ = centerChunkZ;
         }
         
+        int viewDist = getViewDistance();
+        int maxChunksPerFrame = getMaxChunksPerFrame();
+        int maxMeshesPerFrame = getMaxMeshesPerFrame();
+        
         int chunksGenerated = 0;
         int chunksMeshed = 0;
-        int maxChunks = (VIEW_DISTANCE * 2 + 1) * (VIEW_DISTANCE * 2 + 1);
+        int maxChunks = (viewDist * 2 + 1) * (viewDist * 2 + 1);
         
         // FIRST: Process dirty chunks (from block breaking/placing) - highest priority
         // This prevents freezes when breaking/placing blocks
         // Limit how many chunks we check to avoid iterating over large collections
-        if (chunksMeshed < MAX_MESHES_PER_FRAME) {
+        if (chunksMeshed < maxMeshesPerFrame) {
             int chunksChecked = 0;
             int maxChecks = 20; // Don't check more than 20 chunks per frame
             
             for (Chunk chunk : world.getChunks()) {
-                if (chunksMeshed >= MAX_MESHES_PER_FRAME || chunksChecked >= maxChecks) break;
+                if (chunksMeshed >= maxMeshesPerFrame || chunksChecked >= maxChecks) break;
                 chunksChecked++;
                 
                 // Only process chunks within view distance
                 int dx = chunk.getChunkX() - centerChunkX;
                 int dz = chunk.getChunkZ() - centerChunkZ;
-                if (Math.abs(dx) > VIEW_DISTANCE || Math.abs(dz) > VIEW_DISTANCE) {
+                if (Math.abs(dx) > viewDist || Math.abs(dz) > viewDist) {
                     continue;
                 }
                 
@@ -713,14 +725,14 @@ public class VoxelGame implements IGameLogic {
         
         // SECOND: Process new chunks in spiral pattern (only if we have capacity)
         while (chunkLoadSpiralIndex < maxChunks && 
-               chunksGenerated < MAX_CHUNKS_PER_FRAME) {
+               chunksGenerated < maxChunksPerFrame) {
             
             int[] offset = getSpiralOffset(chunkLoadSpiralIndex);
             int chunkX = centerChunkX + offset[0];
             int chunkZ = centerChunkZ + offset[1];
             
             // Check if within view distance
-            if (Math.abs(offset[0]) > VIEW_DISTANCE || Math.abs(offset[1]) > VIEW_DISTANCE) {
+            if (Math.abs(offset[0]) > viewDist || Math.abs(offset[1]) > viewDist) {
                 chunkLoadSpiralIndex++;
                 continue;
             }
@@ -742,6 +754,42 @@ public class VoxelGame implements IGameLogic {
         }
         
         chunksProcessedThisFrame = chunksGenerated + chunksMeshed;
+    }
+    
+    /**
+     * Gets the current view distance from settings.
+     * 
+     * @return View distance in chunks
+     */
+    private int getViewDistance() {
+        if (settingsManager != null && settingsManager.getSettings() != null) {
+            return settingsManager.getSettings().getViewDistance();
+        }
+        return DEFAULT_VIEW_DISTANCE;
+    }
+    
+    /**
+     * Gets the maximum chunks to generate per frame from settings.
+     * 
+     * @return Max chunks per frame
+     */
+    private int getMaxChunksPerFrame() {
+        if (settingsManager != null && settingsManager.getSettings() != null) {
+            return settingsManager.getSettings().getMaxChunksPerFrame();
+        }
+        return DEFAULT_MAX_CHUNKS_PER_FRAME;
+    }
+    
+    /**
+     * Gets the maximum meshes to build per frame from settings.
+     * 
+     * @return Max meshes per frame
+     */
+    private int getMaxMeshesPerFrame() {
+        if (settingsManager != null && settingsManager.getSettings() != null) {
+            return settingsManager.getSettings().getMaxMeshesPerFrame();
+        }
+        return DEFAULT_MAX_MESHES_PER_FRAME;
     }
     
     @Override
