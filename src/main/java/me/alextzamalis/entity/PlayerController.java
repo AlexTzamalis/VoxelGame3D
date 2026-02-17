@@ -216,13 +216,13 @@ public class PlayerController {
         
         if (wPressed) {
             Vector3f forward = camera.getForward();
-            dx -= forward.x * speed;
-            dz -= forward.z * speed;
+            dx += forward.x * speed;  // Fixed: was -=, should be +
+            dz += forward.z * speed;  // Fixed: was -=, should be +
         }
         if (sPressed) {
             Vector3f forward = camera.getForward();
-            dx += forward.x * speed;
-            dz += forward.z * speed;
+            dx -= forward.x * speed;  // Fixed: was +=, should be -
+            dz -= forward.z * speed;  // Fixed: was +=, should be -
         }
         if (aPressed) {
             Vector3f right = camera.getRight();
@@ -269,12 +269,11 @@ public class PlayerController {
             double deltaX = inputManager.getDeltaX();
             double deltaY = inputManager.getDeltaY();
             
-            // Only rotate if there's actual mouse movement
-            if (Math.abs(deltaX) > 0.001 || Math.abs(deltaY) > 0.001) {
-                float rotX = (float) deltaY * mouseSensitivity;
-                float rotY = (float) deltaX * mouseSensitivity;
-                camera.rotate(rotX, rotY, 0);
-            }
+            // Apply rotation directly (no momentum, immediate response)
+            // Invert Y axis for natural mouse look (up = look up, down = look down)
+            float rotX = (float) -deltaY * mouseSensitivity;  // Inverted Y
+            float rotY = (float) deltaX * mouseSensitivity;    // Normal X
+            camera.rotate(rotX, rotY, 0);
         }
     }
     

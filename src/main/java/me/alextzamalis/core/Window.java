@@ -44,6 +44,9 @@ public class Window {
     /** Flag indicating if the window was resized. */
     private boolean resized;
     
+    /** Window focus callback (set by VoxelGame). */
+    private Runnable onFocusCallback;
+    
     /** Flag indicating if VSync is enabled. */
     private boolean vSync;
     
@@ -107,6 +110,13 @@ public class Window {
             this.width = w;
             this.height = h;
             this.resized = true;
+        });
+        
+        // Setup window focus callback to re-grab cursor when window regains focus
+        glfwSetWindowFocusCallback(windowHandle, (window, focused) -> {
+            if (focused && onFocusCallback != null) {
+                onFocusCallback.run();
+            }
         });
         
         // Note: Escape key handling is done in game logic to allow cursor release first
@@ -300,6 +310,15 @@ public class Window {
      */
     public boolean isKeyPressed(int keyCode) {
         return glfwGetKey(windowHandle, keyCode) == GLFW_PRESS;
+    }
+    
+    /**
+     * Sets a callback to be called when the window gains focus.
+     * 
+     * @param callback The callback to run when window gains focus
+     */
+    public void setOnFocusCallback(Runnable callback) {
+        this.onFocusCallback = callback;
     }
 }
 

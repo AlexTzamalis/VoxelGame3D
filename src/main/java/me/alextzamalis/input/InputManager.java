@@ -83,6 +83,9 @@ public class InputManager {
     /** GLFW scroll callback. */
     private GLFWScrollCallback scrollCallback;
     
+    /** Flag to ignore cursor position updates when we're resetting the cursor. */
+    private boolean ignoreNextCursorUpdate = false;
+    
     /**
      * Creates a new input manager.
      */
@@ -125,6 +128,11 @@ public class InputManager {
         cursorPosCallback = new GLFWCursorPosCallback() {
             @Override
             public void invoke(long window, double xpos, double ypos) {
+                // Ignore cursor updates when we're resetting the cursor to center
+                if (ignoreNextCursorUpdate) {
+                    ignoreNextCursorUpdate = false;
+                    return;
+                }
                 mouseX = xpos;
                 mouseY = ypos;
             }
@@ -175,13 +183,16 @@ public class InputManager {
             // Then reset cursor to center for next frame
             double centerX = window.getWidth() / 2.0;
             double centerY = window.getHeight() / 2.0;
+            
+            // Set flag to ignore the callback that will fire from glfwSetCursorPos
+            ignoreNextCursorUpdate = true;
             glfwSetCursorPos(windowHandle, centerX, centerY);
             
-            // Update positions for next frame
-            // The callback will update mouseX/mouseY to center after this
+            // Immediately update positions to center (don't wait for callback)
+            mouseX = centerX;
+            mouseY = centerY;
             previousMouseX = centerX;
             previousMouseY = centerY;
-            // Note: mouseX/mouseY will be updated by the callback, but we've already used them for delta
         } else {
             // Normal mode - calculate delta from previous position
             deltaX = mouseX - previousMouseX;

@@ -262,6 +262,16 @@ public class VoxelGame implements IGameLogic {
         settingsScreen = new SettingsScreen(screenManager);
         screenManager.registerScreen(GameState.SETTINGS, settingsScreen);
         
+        // Setup window focus callback to re-grab cursor when window regains focus
+        window.setOnFocusCallback(() -> {
+            // When window regains focus, re-grab cursor if we're in PLAYING state
+            if (screenManager.getCurrentState() == GameState.PLAYING && inputManagerRef != null) {
+                inputManagerRef.setCursorGrabbed(true);
+                inputManagerRef.centerCursor(window);
+                Logger.info("Cursor re-grabbed after window focus");
+            }
+        });
+        
         // Listen for state changes
         // NOTE: This callback may be called from update thread, so we can't call OpenGL here
         // Instead, we'll handle OpenGL operations in the render method
