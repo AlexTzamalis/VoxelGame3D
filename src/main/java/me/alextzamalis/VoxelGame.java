@@ -4,11 +4,14 @@ import me.alextzamalis.core.IGameLogic;
 import me.alextzamalis.core.Window;
 import me.alextzamalis.entity.PlayerController;
 import me.alextzamalis.graphics.*;
+import me.alextzamalis.gui.GameState;
+import me.alextzamalis.gui.ScreenManager;
+import me.alextzamalis.gui.hud.GameHUD;
+import me.alextzamalis.gui.screens.*;
 import me.alextzamalis.input.InputManager;
 import me.alextzamalis.util.Logger;
 import me.alextzamalis.util.ResourceLoader;
 import me.alextzamalis.physics.BlockInteraction;
-import me.alextzamalis.physics.BlockRaycast;
 import me.alextzamalis.voxel.Block;
 import me.alextzamalis.voxel.BlockFace;
 import me.alextzamalis.voxel.BlockRegistry;
@@ -23,7 +26,10 @@ import static org.lwjgl.glfw.GLFW.*;
 /**
  * Main voxel game implementation using the modular engine systems.
  * 
- * <p>Controls:
+ * <p>The game starts in the main menu and transitions through states:
+ * MAIN_MENU -> WORLD_SELECT -> WORLD_CREATE -> LOADING -> PLAYING
+ * 
+ * <p>Controls (when playing):
  * <ul>
  *   <li>Click to grab mouse for camera look</li>
  *   <li>WASD - Move</li>
@@ -33,7 +39,7 @@ import static org.lwjgl.glfw.GLFW.*;
  *   <li>Left Click - Break block</li>
  *   <li>Right Click - Place block</li>
  *   <li>1-7 - Select block type</li>
- *   <li>Escape - Release mouse / Close game</li>
+ *   <li>Escape - Pause menu / Release mouse</li>
  *   <li>F1 - Toggle wireframe mode</li>
  *   <li>F3 - Toggle game mode (creative/survival)</li>
  * </ul>
@@ -61,23 +67,44 @@ public class VoxelGame implements IGameLogic {
     /** Ambient light color/intensity. */
     private static final Vector3f AMBIENT_COLOR = new Vector3f(0.4f, 0.4f, 0.4f);
     
+    // ==================== Core Systems ====================
+    
     /** The renderer. */
     private Renderer renderer;
     
     /** The shader program. */
     private ShaderProgram shaderProgram;
     
+    /** The texture atlas for all block textures. */
+    private TextureAtlas textureAtlas;
+    
+    /** Transformation utility. */
+    private Transformation transformation;
+    
+    // ==================== GUI System ====================
+    
+    /** Screen manager for menus. */
+    private ScreenManager screenManager;
+    
+    /** Main menu screen. */
+    private MainMenuScreen mainMenuScreen;
+    
+    /** World select screen. */
+    private WorldSelectScreen worldSelectScreen;
+    
+    /** World create screen. */
+    private WorldCreateScreen worldCreateScreen;
+    
+    /** Loading screen. */
+    private LoadingScreen loadingScreen;
+    
+    // ==================== Game World (initialized on world load) ====================
+    
     /** The player controller. */
     private PlayerController playerController;
     
     /** The voxel world. */
     private World world;
-    
-    /** Transformation utility. */
-    private Transformation transformation;
-    
-    /** The texture atlas for all block textures. */
-    private TextureAtlas textureAtlas;
     
     /** Frustum culler for visibility testing. */
     private FrustumCuller frustumCuller;
@@ -88,30 +115,54 @@ public class VoxelGame implements IGameLogic {
     /** Block highlight renderer. */
     private BlockHighlight blockHighlight;
     
+    /** In-game HUD. */
+    private GameHUD gameHUD;
+    
+    // ==================== State ====================
+    
     /** F1 key state for toggle. */
     private boolean f1WasPressed;
     
+    /** Escape key state for toggle. */
+    private boolean escapeWasPressed;
+    
     /** Frame counter for chunk loading rate limiting. */
     private int chunksProcessedThisFrame;
+    
+    /** World being loaded (for async loading). */
+    private String pendingWorldName;
+    private long pendingWorldSeed;
+    
+    /** Loading progress tracker. */
+    private int loadingChunksTotal;
+    private int loadingChunksCompleted;
+    
+    /** Reference to window for closing. */
+    private Window windowRef;
+    
+    /** Reference to input manager for GUI. */
+    private InputManager inputManagerRef;
     
     /**
      * Creates a new voxel game.
      */
     public VoxelGame() {
         this.f1WasPressed = false;
+        this.escapeWasPressed = false;
         this.chunksProcessedThisFrame = 0;
     }
     
     @Override
     public void init(Window window) throws Exception {
         Logger.info("Initializing Voxel Game...");
+        this.windowRef = window;
         
         // Initialize renderer
         renderer = new Renderer();
         renderer.init();
-        renderer.setClearColor(0.5f, 0.7f, 1.0f, 1.0f); // Sky blue
+        renderer.setClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Dark menu background
         
-        // Build texture atlas from all block textures
+        // Build texture atlas from all block textures (do this early for fast world loading later)
         Logger.info("Building texture atlas...");
         textureAtlas = buildTextureAtlas();
         
@@ -133,21 +184,116 @@ public class VoxelGame implements IGameLogic {
         shaderProgram.createUniform("lightDirection");
         shaderProgram.createUniform("ambientColor");
         
-        // Initialize player controller
-        Logger.info("Initializing player...");
-        playerController = new PlayerController();
-        playerController.init(window, new Vector3f(0, 70, 0));
-        playerController.setMovementSpeed(10.0f);
-        
         // Initialize transformation
         transformation = new Transformation();
+        
+        // Initialize GUI system
+        initializeMenus(window);
+        
+        // Start in main menu
+        screenManager.setState(GameState.MAIN_MENU);
+        
+        // Make sure cursor is visible in menus
+        glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        
+        Logger.info("Voxel Game initialized! Starting in main menu.");
+    }
+    
+    /**
+     * Initializes the menu system.
+     */
+    private void initializeMenus(Window window) throws Exception {
+        screenManager = new ScreenManager();
+        screenManager.init(window.getWidth(), window.getHeight());
+        
+        // Create main menu
+        mainMenuScreen = new MainMenuScreen(screenManager);
+        mainMenuScreen.setOnQuit(() -> window.setWindowShouldClose(true));
+        screenManager.registerScreen(GameState.MAIN_MENU, mainMenuScreen);
+        
+        // Create world select screen
+        worldSelectScreen = new WorldSelectScreen(screenManager);
+        worldSelectScreen.setOnWorldSelected(this::startLoadingWorld);
+        screenManager.registerScreen(GameState.WORLD_SELECT, worldSelectScreen);
+        
+        // Create world create screen
+        worldCreateScreen = new WorldCreateScreen(screenManager);
+        worldCreateScreen.setOnWorldCreate(this::startLoadingWorld);
+        screenManager.registerScreen(GameState.WORLD_CREATE, worldCreateScreen);
+        
+        // Create loading screen
+        loadingScreen = new LoadingScreen();
+        loadingScreen.setOnLoadingComplete(this::onWorldLoadComplete);
+        screenManager.registerScreen(GameState.LOADING, loadingScreen);
+        
+        // Listen for state changes
+        screenManager.setStateChangeListener((oldState, newState) -> {
+            if (newState == GameState.PLAYING) {
+                // Lock cursor when playing
+                glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                renderer.setClearColor(0.5f, 0.7f, 1.0f, 1.0f); // Sky blue
+            } else {
+                // Show cursor in menus
+                glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                if (newState != GameState.LOADING) {
+                    renderer.setClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Dark menu
+                }
+            }
+        });
+        
+        Logger.info("Menu system initialized");
+    }
+    
+    /**
+     * Starts loading a world.
+     */
+    private void startLoadingWorld(String worldName, long seed) {
+        this.pendingWorldName = worldName;
+        this.pendingWorldSeed = seed;
+        
+        loadingScreen.setProgress(0);
+        loadingScreen.setStatusMessage("Preparing world...");
+        
+        // Calculate total chunks to load
+        int diameter = VIEW_DISTANCE * 2 + 1;
+        loadingChunksTotal = diameter * diameter;
+        loadingChunksCompleted = 0;
+        
+        screenManager.setState(GameState.LOADING);
+        
+        Logger.info("Starting to load world: %s (seed: %d)", worldName, seed);
+    }
+    
+    /**
+     * Called when world loading is complete.
+     */
+    private void onWorldLoadComplete() {
+        screenManager.setState(GameState.PLAYING);
+        Logger.info("World loading complete! Now playing.");
+        Logger.info("Controls: WASD to move, Space = jump/fly up, Shift = fly down");
+        Logger.info("Left Click = break block, Right Click = place block, 1-7 = select block");
+        Logger.info("F1 = wireframe, F3 = toggle game mode, Escape = menu");
+    }
+    
+    /**
+     * Initializes the world for playing.
+     */
+    private void initializeWorld() throws Exception {
+        Logger.info("Initializing world: %s", pendingWorldName);
+        
+        // Clean up old world if exists
+        cleanupWorld();
+        
+        // Initialize player controller
+        playerController = new PlayerController();
+        playerController.init(windowRef, new Vector3f(0, 70, 0));
+        playerController.setMovementSpeed(10.0f);
         
         // Initialize frustum culler
         frustumCuller = new FrustumCuller();
         
         // Initialize world with heightmap generator
-        Logger.info("Creating world...");
-        world = new World("TestWorld", 12345L);
+        world = new World(pendingWorldName, pendingWorldSeed);
         world.setGenerator(new HeightmapGenerator(world.getSeed(), 60, 20, 0.015f));
         world.setTextureAtlas(textureAtlas);
         
@@ -161,16 +307,30 @@ public class VoxelGame implements IGameLogic {
         // Set world reference for player physics
         playerController.setWorld(world);
         
-        // Load initial chunks around player
-        Logger.info("Generating initial chunks...");
-        Vector3f playerPos = playerController.getPosition();
-        world.loadChunksAround((int) playerPos.x, (int) playerPos.z, VIEW_DISTANCE);
-        
-        Logger.info("Voxel Game initialized! %d chunks loaded.", world.getChunkCount());
-        Logger.info("Controls: Click to look, WASD to move, Space = jump/fly up, Shift = fly down");
-        Logger.info("Left Click = break block, Right Click = place block, 1-7 = select block");
-        Logger.info("F1 = wireframe, F3 = toggle game mode (creative/survival), Escape = quit");
-        Logger.info("Current game mode: %s", playerController.getGameMode());
+        // Initialize HUD
+        gameHUD = new GameHUD();
+        gameHUD.init(windowRef.getWidth(), windowRef.getHeight());
+    }
+    
+    /**
+     * Cleans up the current world.
+     */
+    private void cleanupWorld() {
+        if (gameHUD != null) {
+            gameHUD.cleanup();
+            gameHUD = null;
+        }
+        if (blockHighlight != null) {
+            blockHighlight.cleanup();
+            blockHighlight = null;
+        }
+        if (world != null) {
+            world.cleanup();
+            world = null;
+        }
+        blockInteraction = null;
+        playerController = null;
+        frustumCuller = null;
     }
     
     /**
@@ -197,22 +357,189 @@ public class VoxelGame implements IGameLogic {
     
     @Override
     public void input(Window window, InputManager inputManager) {
-        // Process player input (includes F3 for game mode toggle)
-        if (playerController.processInput(window, inputManager)) {
-            window.setWindowShouldClose(true);
-        }
+        this.inputManagerRef = inputManager;
         
-        // Toggle wireframe with F1
-        boolean f1Pressed = window.isKeyPressed(GLFW_KEY_F1);
-        if (f1Pressed && !f1WasPressed) {
-            renderer.toggleWireframe();
-            Logger.info("Wireframe: %s", renderer.isWireframe() ? "ON" : "OFF");
+        GameState currentState = screenManager.getCurrentState();
+        
+        if (currentState == GameState.PLAYING) {
+            // Handle escape to pause
+            boolean escapePressed = window.isKeyPressed(GLFW_KEY_ESCAPE);
+            if (escapePressed && !escapeWasPressed) {
+                // For now, just release cursor. Later: open pause menu
+                glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                screenManager.setState(GameState.MAIN_MENU);
+                cleanupWorld();
+            }
+            escapeWasPressed = escapePressed;
+            
+            // Process player input
+            if (playerController != null) {
+                playerController.processInput(window, inputManager);
+            }
+            
+            // Toggle wireframe with F1
+            boolean f1Pressed = window.isKeyPressed(GLFW_KEY_F1);
+            if (f1Pressed && !f1WasPressed) {
+                renderer.toggleWireframe();
+                Logger.info("Wireframe: %s", renderer.isWireframe() ? "ON" : "OFF");
+            }
+            f1WasPressed = f1Pressed;
+            
+            // Hotbar selection with number keys 1-9
+            if (gameHUD != null) {
+                for (int i = 0; i < 9; i++) {
+                    if (window.isKeyPressed(GLFW_KEY_1 + i)) {
+                        gameHUD.setSelectedSlot(i);
+                        blockInteraction.setSelectedBlockId(i + 1); // Block IDs start at 1
+                    }
+                }
+                
+                // Scroll wheel for hotbar
+                double scrollY = inputManager.getScrollOffset();
+                if (scrollY != 0) {
+                    gameHUD.scrollSlot((int) -scrollY);
+                    blockInteraction.setSelectedBlockId(gameHUD.getSelectedSlot() + 1);
+                }
+            }
+        } else {
+            // Menu input
+            screenManager.input(window, inputManager);
         }
-        f1WasPressed = f1Pressed;
     }
     
     @Override
     public void update(float deltaTime, InputManager inputManager) {
+        GameState currentState = screenManager.getCurrentState();
+        
+        switch (currentState) {
+            case MAIN_MENU:
+                mainMenuScreen.update(deltaTime, inputManager);
+                break;
+                
+            case WORLD_SELECT:
+                worldSelectScreen.update(deltaTime, inputManager);
+                break;
+                
+            case WORLD_CREATE:
+                worldCreateScreen.update(deltaTime, inputManager);
+                break;
+                
+            case LOADING:
+                updateLoading(deltaTime);
+                break;
+                
+            case PLAYING:
+                updatePlaying(deltaTime, inputManager);
+                break;
+                
+            default:
+                screenManager.update(deltaTime);
+                break;
+        }
+    }
+    
+    /**
+     * Updates the loading state.
+     */
+    private void updateLoading(float deltaTime) {
+        loadingScreen.update(deltaTime);
+        
+        // Initialize world on first frame of loading
+        if (world == null && pendingWorldName != null) {
+            try {
+                initializeWorld();
+                loadingScreen.setStatusMessage("Generating terrain...");
+            } catch (Exception e) {
+                Logger.error("Failed to initialize world: %s", e.getMessage());
+                screenManager.setState(GameState.MAIN_MENU);
+                return;
+            }
+        }
+        
+        // Generate chunks incrementally
+        if (world != null && loadingChunksCompleted < loadingChunksTotal) {
+            Vector3f playerPos = playerController.getPosition();
+            int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
+            int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
+            
+            // Process more chunks during loading (faster loading)
+            int chunksThisFrame = Math.min(8, loadingChunksTotal - loadingChunksCompleted);
+            
+            for (int i = 0; i < chunksThisFrame; i++) {
+                // Calculate chunk position in spiral
+                int index = loadingChunksCompleted;
+                int[] offset = getSpiralOffset(index);
+                int chunkX = playerChunkX + offset[0];
+                int chunkZ = playerChunkZ + offset[1];
+                
+                Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
+                
+                if (!chunk.isGenerated()) {
+                    world.getGenerator().generateChunk(chunk, world);
+                    chunk.setGenerated(true);
+                }
+                
+                if (chunk.isDirty()) {
+                    world.buildChunkMesh(chunk);
+                }
+                
+                loadingChunksCompleted++;
+            }
+            
+            // Update progress
+            float progress = (float) loadingChunksCompleted / loadingChunksTotal;
+            loadingScreen.setProgress(progress);
+            loadingScreen.setStatusMessage(String.format("Generating terrain... %d%%", (int)(progress * 100)));
+            
+            // Check if loading is complete
+            if (loadingChunksCompleted >= loadingChunksTotal) {
+                loadingScreen.complete();
+            }
+        }
+    }
+    
+    /**
+     * Gets the spiral offset for a given index.
+     */
+    private int[] getSpiralOffset(int index) {
+        if (index == 0) return new int[]{0, 0};
+        
+        int x = 0, z = 0;
+        int dx = 0, dz = -1;
+        int segmentLength = 1;
+        int segmentPassed = 0;
+        int direction = 0;
+        
+        for (int i = 0; i < index; i++) {
+            if (segmentPassed == segmentLength) {
+                segmentPassed = 0;
+                direction = (direction + 1) % 4;
+                if (direction == 0 || direction == 2) {
+                    segmentLength++;
+                }
+            }
+            
+            switch (direction) {
+                case 0: dx = 1; dz = 0; break;
+                case 1: dx = 0; dz = 1; break;
+                case 2: dx = -1; dz = 0; break;
+                case 3: dx = 0; dz = -1; break;
+            }
+            
+            x += dx;
+            z += dz;
+            segmentPassed++;
+        }
+        
+        return new int[]{x, z};
+    }
+    
+    /**
+     * Updates the playing state.
+     */
+    private void updatePlaying(float deltaTime, InputManager inputManager) {
+        if (playerController == null || world == null) return;
+        
         playerController.update(deltaTime, inputManager);
         
         // Update block highlight (raycasting)
@@ -221,18 +548,15 @@ public class VoxelGame implements IGameLogic {
         // Update block interaction (breaking/placing)
         blockInteraction.update(playerController.getCamera(), inputManager, deltaTime);
         
-        // Load chunks around player (rate-limited to prevent frame drops)
+        // Load chunks around player (rate-limited)
         Vector3f playerPos = playerController.getPosition();
         int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
         int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
         
-        // Reset frame counter
         chunksProcessedThisFrame = 0;
-        
-        // Load chunks in a spiral pattern from player outward
         loadChunksAroundPlayer(playerChunkX, playerChunkZ);
         
-        // Unload distant chunks to free memory
+        // Unload distant chunks
         int unloadDistance = (int) (VIEW_DISTANCE * UNLOAD_DISTANCE_MULTIPLIER);
         world.unloadDistantChunks(playerChunkX, playerChunkZ, unloadDistance);
     }
@@ -241,11 +565,9 @@ public class VoxelGame implements IGameLogic {
      * Loads chunks around the player with rate limiting.
      */
     private void loadChunksAroundPlayer(int centerChunkX, int centerChunkZ) {
-        // Load in a spiral pattern (closer chunks first)
         for (int radius = 0; radius <= VIEW_DISTANCE && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; radius++) {
             for (int dx = -radius; dx <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dx++) {
                 for (int dz = -radius; dz <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dz++) {
-                    // Only process chunks on the current ring (optimization)
                     if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) {
                         continue;
                     }
@@ -255,14 +577,12 @@ public class VoxelGame implements IGameLogic {
                     
                     Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
                     
-                    // Generate if needed
                     if (!chunk.isGenerated()) {
                         world.getGenerator().generateChunk(chunk, world);
                         chunk.setGenerated(true);
                         chunksProcessedThisFrame++;
                     }
                     
-                    // Build mesh if dirty
                     if (chunk.isDirty() && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME) {
                         world.buildChunkMesh(chunk);
                         chunksProcessedThisFrame++;
@@ -276,9 +596,24 @@ public class VoxelGame implements IGameLogic {
     public void render(Window window) {
         renderer.prepare(window);
         
+        GameState currentState = screenManager.getCurrentState();
+        
+        if (currentState == GameState.PLAYING && world != null && playerController != null) {
+            renderWorld(window);
+        }
+        
+        // Render GUI on top
+        screenManager.render();
+    }
+    
+    /**
+     * Renders the voxel world.
+     */
+    private void renderWorld(Window window) {
         // Update projection if window resized
         if (window.isResized()) {
             playerController.updateProjection(window);
+            screenManager.resize(window.getWidth(), window.getHeight());
         }
         
         // Update view matrix
@@ -297,22 +632,20 @@ public class VoxelGame implements IGameLogic {
         // Bind texture atlas
         textureAtlas.bind(0);
         
-        // Identity model matrix for chunks (they use world coordinates)
+        // Identity model matrix for chunks
         Matrix4f modelMatrix = new Matrix4f().identity();
         shaderProgram.setUniform("modelMatrix", modelMatrix);
         
-        // Update frustum culler with current matrices
+        // Update frustum culler
         frustumCuller.update(camera.getProjectionMatrix(), camera.getViewMatrix());
         
-        // Render visible chunks (frustum culling)
-        int renderedChunks = 0;
+        // Render visible chunks
         for (Chunk chunk : world.getChunks()) {
             if (chunk.hasMesh()) {
                 if (frustumCuller.isChunkInFrustum(
                         chunk.getChunkX(), chunk.getChunkZ(),
                         Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
                     chunk.getMesh().render();
-                    renderedChunks++;
                 }
             }
         }
@@ -321,16 +654,24 @@ public class VoxelGame implements IGameLogic {
         textureAtlas.unbind();
         shaderProgram.unbind();
         
-        // Render block highlight (after main rendering)
+        // Render block highlight
         blockHighlight.render(camera);
+        
+        // Render HUD
+        if (gameHUD != null) {
+            screenManager.getGuiRenderer().begin();
+            gameHUD.render(screenManager.getGuiRenderer());
+            screenManager.getGuiRenderer().end();
+        }
     }
     
     @Override
     public void cleanup() {
         Logger.info("Cleaning up Voxel Game...");
         
-        if (blockHighlight != null) blockHighlight.cleanup();
-        if (world != null) world.cleanup();
+        cleanupWorld();
+        
+        if (screenManager != null) screenManager.cleanup();
         if (shaderProgram != null) shaderProgram.cleanup();
         if (textureAtlas != null) textureAtlas.cleanup();
         if (renderer != null) renderer.cleanup();
