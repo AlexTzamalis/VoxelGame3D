@@ -108,14 +108,15 @@ public class BlockRegistry {
             .hardness(0.5f)
             .build());
         
-        // Grass Block (different textures on different faces)
+        // Grass Block (different textures on different faces, green tint on top)
         register(new Block.Builder("minecraft:grass_block")
             .displayName("Grass Block")
             .textures(new BlockTextures(
-                VANILLA_TEXTURE_PATH + "grass_block_top.png",   // top
+                VANILLA_TEXTURE_PATH + "grass_block_top.png",   // top (grayscale, will be tinted)
                 VANILLA_TEXTURE_PATH + "dirt.png",               // bottom
                 VANILLA_TEXTURE_PATH + "grass_block_side.png"    // sides (grass with dirt)
             ))
+            .tints(Block.GRASS_TINT, Block.DEFAULT_TINT, Block.DEFAULT_TINT) // Green top, normal bottom/sides
             .hardness(0.6f)
             .build());
         
