@@ -27,11 +27,15 @@ import static org.lwjgl.glfw.GLFW.*;
  * <ul>
  *   <li>Click to grab mouse for camera look</li>
  *   <li>WASD - Move</li>
- *   <li>Space/Shift - Move up/down</li>
+ *   <li>Space - Jump (survival) / Fly up (creative)</li>
+ *   <li>Shift - Fly down (creative)</li>
  *   <li>Left Ctrl - Sprint</li>
+ *   <li>Left Click - Break block</li>
+ *   <li>Right Click - Place block</li>
+ *   <li>1-7 - Select block type</li>
  *   <li>Escape - Release mouse / Close game</li>
  *   <li>F1 - Toggle wireframe mode</li>
- *   <li>F3 - Toggle debug info</li>
+ *   <li>F3 - Toggle game mode (creative/survival)</li>
  * </ul>
  * 
  * @author AlexTzamalis
@@ -75,22 +79,17 @@ public class VoxelGame implements IGameLogic {
     /** Block interaction handler. */
     private BlockInteraction blockInteraction;
     
-    /** Debug display flag. */
-    private boolean showDebug;
+    /** Block highlight renderer. */
+    private BlockHighlight blockHighlight;
     
     /** F1 key state for toggle. */
     private boolean f1WasPressed;
-    
-    /** F3 key state for toggle. */
-    private boolean f3WasPressed;
     
     /**
      * Creates a new voxel game.
      */
     public VoxelGame() {
-        this.showDebug = false;
         this.f1WasPressed = false;
-        this.f3WasPressed = false;
     }
     
     @Override
@@ -145,15 +144,23 @@ public class VoxelGame implements IGameLogic {
         // Initialize block interaction
         blockInteraction = new BlockInteraction(world);
         
+        // Initialize block highlight
+        blockHighlight = new BlockHighlight();
+        blockHighlight.init();
+        
+        // Set world reference for player physics
+        playerController.setWorld(world);
+        
         // Load initial chunks around player
         Logger.info("Generating initial chunks...");
         Vector3f playerPos = playerController.getPosition();
         world.loadChunksAround((int) playerPos.x, (int) playerPos.z, VIEW_DISTANCE);
         
         Logger.info("Voxel Game initialized! %d chunks loaded.", world.getChunkCount());
-        Logger.info("Controls: Click to look, WASD to move, Space/Shift up/down, Ctrl to sprint");
+        Logger.info("Controls: Click to look, WASD to move, Space = jump/fly up, Shift = fly down");
         Logger.info("Left Click = break block, Right Click = place block, 1-7 = select block");
-        Logger.info("F1 = wireframe, F3 = debug info, Escape = release mouse/quit");
+        Logger.info("F1 = wireframe, F3 = toggle game mode (creative/survival), Escape = quit");
+        Logger.info("Current game mode: %s", playerController.getGameMode());
     }
     
     /**
@@ -180,7 +187,7 @@ public class VoxelGame implements IGameLogic {
     
     @Override
     public void input(Window window, InputManager inputManager) {
-        // Process player input
+        // Process player input (includes F3 for game mode toggle)
         if (playerController.processInput(window, inputManager)) {
             window.setWindowShouldClose(true);
         }
@@ -192,19 +199,14 @@ public class VoxelGame implements IGameLogic {
             Logger.info("Wireframe: %s", renderer.isWireframe() ? "ON" : "OFF");
         }
         f1WasPressed = f1Pressed;
-        
-        // Toggle debug with F3
-        boolean f3Pressed = window.isKeyPressed(GLFW_KEY_F3);
-        if (f3Pressed && !f3WasPressed) {
-            showDebug = !showDebug;
-            Logger.info("Debug display: %s", showDebug ? "ON" : "OFF");
-        }
-        f3WasPressed = f3Pressed;
     }
     
     @Override
     public void update(float deltaTime, InputManager inputManager) {
         playerController.update(deltaTime, inputManager);
+        
+        // Update block highlight (raycasting)
+        blockHighlight.update(playerController.getCamera(), world);
         
         // Update block interaction (breaking/placing)
         blockInteraction.update(playerController.getCamera(), inputManager, deltaTime);
@@ -259,15 +261,19 @@ public class VoxelGame implements IGameLogic {
             }
         }
         
-        // Unbind
+        // Unbind main shader
         textureAtlas.unbind();
         shaderProgram.unbind();
+        
+        // Render block highlight (after main rendering)
+        blockHighlight.render(camera);
     }
     
     @Override
     public void cleanup() {
         Logger.info("Cleaning up Voxel Game...");
         
+        if (blockHighlight != null) blockHighlight.cleanup();
         if (world != null) world.cleanup();
         if (shaderProgram != null) shaderProgram.cleanup();
         if (textureAtlas != null) textureAtlas.cleanup();

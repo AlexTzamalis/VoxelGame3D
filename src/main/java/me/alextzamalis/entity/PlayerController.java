@@ -3,6 +3,8 @@ package me.alextzamalis.entity;
 import me.alextzamalis.core.Window;
 import me.alextzamalis.graphics.Camera;
 import me.alextzamalis.input.InputManager;
+import me.alextzamalis.physics.PlayerPhysics;
+import me.alextzamalis.voxel.World;
 import org.joml.Vector3f;
 
 import static org.lwjgl.glfw.GLFW.*;
@@ -20,6 +22,8 @@ import static org.lwjgl.glfw.GLFW.*;
  *   <li>Mouse look controls</li>
  *   <li>Cursor grab/release</li>
  *   <li>Movement speed and sensitivity settings</li>
+ *   <li>Physics (gravity, collision) in survival mode</li>
+ *   <li>Game mode switching (creative/survival)</li>
  * </ul>
  * 
  * @author AlexTzamalis
@@ -27,8 +31,21 @@ import static org.lwjgl.glfw.GLFW.*;
  */
 public class PlayerController {
     
+    /**
+     * Game modes that affect player physics and abilities.
+     */
+    public enum GameMode {
+        /** Survival mode with gravity and collision. */
+        SURVIVAL,
+        /** Creative mode with flying and no collision. */
+        CREATIVE
+    }
+    
     /** Default movement speed in units per second. */
     public static final float DEFAULT_MOVEMENT_SPEED = 5.0f;
+    
+    /** Creative mode flying speed. */
+    public static final float CREATIVE_FLY_SPEED = 10.0f;
     
     /** Default mouse sensitivity. */
     public static final float DEFAULT_MOUSE_SENSITIVITY = 0.1f;
@@ -38,6 +55,12 @@ public class PlayerController {
     
     /** The camera controlled by this player. */
     private final Camera camera;
+    
+    /** Player physics handler. */
+    private final PlayerPhysics physics;
+    
+    /** Current game mode. */
+    private GameMode gameMode;
     
     /** Movement speed in units per second. */
     private float movementSpeed;
@@ -54,16 +77,24 @@ public class PlayerController {
     /** Flag to track if Escape was pressed last frame. */
     private boolean escapeWasPressed;
     
+    /** Flag to track if F3 was pressed last frame (game mode toggle). */
+    private boolean f3WasPressed;
+    
     /**
      * Creates a new player controller with default settings.
      */
     public PlayerController() {
         this.camera = new Camera();
+        this.physics = new PlayerPhysics();
+        this.gameMode = GameMode.CREATIVE; // Start in creative mode for easier testing
         this.movementSpeed = DEFAULT_MOVEMENT_SPEED;
         this.mouseSensitivity = DEFAULT_MOUSE_SENSITIVITY;
         this.sprinting = false;
         this.leftMouseWasPressed = false;
         this.escapeWasPressed = false;
+        this.f3WasPressed = false;
+        
+        updatePhysicsForGameMode();
     }
     
     /**
@@ -73,11 +104,16 @@ public class PlayerController {
      */
     public PlayerController(Camera camera) {
         this.camera = camera;
+        this.physics = new PlayerPhysics();
+        this.gameMode = GameMode.CREATIVE;
         this.movementSpeed = DEFAULT_MOVEMENT_SPEED;
         this.mouseSensitivity = DEFAULT_MOUSE_SENSITIVITY;
         this.sprinting = false;
         this.leftMouseWasPressed = false;
         this.escapeWasPressed = false;
+        this.f3WasPressed = false;
+        
+        updatePhysicsForGameMode();
     }
     
     /**
@@ -92,7 +128,16 @@ public class PlayerController {
     }
     
     /**
-     * Processes input for cursor grab/release and escape handling.
+     * Sets the world for physics collision detection.
+     * 
+     * @param world The world
+     */
+    public void setWorld(World world) {
+        physics.setWorld(world);
+    }
+    
+    /**
+     * Processes input for cursor grab/release, escape handling, and game mode toggle.
      * 
      * @param window The game window
      * @param inputManager The input manager
@@ -118,6 +163,13 @@ public class PlayerController {
         }
         escapeWasPressed = escapePressed;
         
+        // F3 - Toggle game mode (creative/survival)
+        boolean f3Pressed = window.isKeyPressed(GLFW_KEY_F3);
+        if (f3Pressed && !f3WasPressed) {
+            toggleGameMode();
+        }
+        f3WasPressed = f3Pressed;
+        
         return false;
     }
     
@@ -130,27 +182,59 @@ public class PlayerController {
     public void update(float deltaTime, InputManager inputManager) {
         // Check sprint
         sprinting = inputManager.isKeyPressed(GLFW_KEY_LEFT_CONTROL);
-        float speed = movementSpeed * deltaTime * (sprinting ? SPRINT_MULTIPLIER : 1.0f);
+        float currentSpeed = (gameMode == GameMode.CREATIVE ? CREATIVE_FLY_SPEED : movementSpeed);
+        float speed = currentSpeed * deltaTime * (sprinting ? SPRINT_MULTIPLIER : 1.0f);
         
-        // Movement
+        // Calculate movement direction
+        float dx = 0, dz = 0;
+        
         if (inputManager.isKeyPressed(GLFW_KEY_W)) {
-            camera.move(0, 0, -speed);
+            Vector3f forward = camera.getForward();
+            dx -= forward.x * speed;
+            dz -= forward.z * speed;
         }
         if (inputManager.isKeyPressed(GLFW_KEY_S)) {
-            camera.move(0, 0, speed);
+            Vector3f forward = camera.getForward();
+            dx += forward.x * speed;
+            dz += forward.z * speed;
         }
         if (inputManager.isKeyPressed(GLFW_KEY_A)) {
-            camera.move(-speed, 0, 0);
+            Vector3f right = camera.getRight();
+            dx -= right.x * speed;
+            dz -= right.z * speed;
         }
         if (inputManager.isKeyPressed(GLFW_KEY_D)) {
-            camera.move(speed, 0, 0);
+            Vector3f right = camera.getRight();
+            dx += right.x * speed;
+            dz += right.z * speed;
         }
-        if (inputManager.isKeyPressed(GLFW_KEY_SPACE)) {
-            camera.move(0, speed, 0);
+        
+        // Apply horizontal movement with collision detection
+        if (gameMode == GameMode.SURVIVAL) {
+            physics.moveWithCollision(camera.getPosition(), dx, dz);
+        } else {
+            camera.getPosition().x += dx;
+            camera.getPosition().z += dz;
         }
-        if (inputManager.isKeyPressed(GLFW_KEY_LEFT_SHIFT)) {
-            camera.move(0, -speed, 0);
+        
+        // Vertical movement
+        if (gameMode == GameMode.CREATIVE) {
+            // Creative mode - free vertical movement
+            if (inputManager.isKeyPressed(GLFW_KEY_SPACE)) {
+                camera.move(0, speed, 0);
+            }
+            if (inputManager.isKeyPressed(GLFW_KEY_LEFT_SHIFT)) {
+                camera.move(0, -speed, 0);
+            }
+        } else {
+            // Survival mode - jumping only when on ground
+            if (inputManager.isKeyPressed(GLFW_KEY_SPACE)) {
+                physics.jump();
+            }
         }
+        
+        // Apply physics (gravity, collision)
+        physics.update(camera.getPosition(), deltaTime);
         
         // Camera rotation with mouse (when cursor is grabbed)
         if (inputManager.isCursorGrabbed()) {
@@ -241,6 +325,59 @@ public class PlayerController {
      */
     public boolean isSprinting() {
         return sprinting;
+    }
+    
+    /**
+     * Gets the current game mode.
+     * 
+     * @return The game mode
+     */
+    public GameMode getGameMode() {
+        return gameMode;
+    }
+    
+    /**
+     * Sets the game mode.
+     * 
+     * @param mode The new game mode
+     */
+    public void setGameMode(GameMode mode) {
+        this.gameMode = mode;
+        updatePhysicsForGameMode();
+        me.alextzamalis.util.Logger.info("Game mode changed to: %s", mode);
+    }
+    
+    /**
+     * Toggles between creative and survival game modes.
+     */
+    public void toggleGameMode() {
+        setGameMode(gameMode == GameMode.CREATIVE ? GameMode.SURVIVAL : GameMode.CREATIVE);
+    }
+    
+    /**
+     * Updates physics settings based on game mode.
+     */
+    private void updatePhysicsForGameMode() {
+        physics.setEnabled(gameMode == GameMode.SURVIVAL);
+        physics.reset();
+    }
+    
+    /**
+     * Gets the player physics handler.
+     * 
+     * @return The physics handler
+     */
+    public PlayerPhysics getPhysics() {
+        return physics;
+    }
+    
+    /**
+     * Checks if the player is on the ground.
+     * 
+     * @return true if on ground
+     */
+    public boolean isOnGround() {
+        return physics.isOnGround();
     }
 }
 
