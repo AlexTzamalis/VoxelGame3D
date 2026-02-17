@@ -53,13 +53,16 @@ import static org.lwjgl.glfw.GLFW.*;
 public class VoxelGame implements IGameLogic {
     
     /** View distance in chunks. */
-    private static final int VIEW_DISTANCE = 4;
+    private static final int VIEW_DISTANCE = 3;
     
     /** Unload distance multiplier (chunks beyond VIEW_DISTANCE * this are unloaded). */
     private static final float UNLOAD_DISTANCE_MULTIPLIER = 1.5f;
     
-    /** Maximum chunks to generate/rebuild per frame (prevents frame drops). */
-    private static final int MAX_CHUNKS_PER_FRAME = 2;
+    /** Maximum chunks to generate per frame (prevents frame drops). */
+    private static final int MAX_CHUNKS_PER_FRAME = 1;
+    
+    /** Maximum chunk meshes to build per frame. */
+    private static final int MAX_MESHES_PER_FRAME = 1;
     
     /** Block texture tile size in pixels. */
     private static final int TEXTURE_TILE_SIZE = 16;
@@ -546,19 +549,20 @@ public class VoxelGame implements IGameLogic {
                 loadingScreen.setStatusMessage("Generating terrain...");
             } catch (Exception e) {
                 Logger.error("Failed to initialize world: %s", e.getMessage());
+                e.printStackTrace();
                 screenManager.setState(GameState.MAIN_MENU);
                 return;
             }
         }
         
-        // Generate chunks incrementally
+        // Generate chunks incrementally - ONLY 1-2 per frame to stay responsive!
         if (world != null && loadingChunksCompleted < loadingChunksTotal) {
             Vector3f playerPos = playerController.getPosition();
             int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
             int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
             
-            // Process more chunks during loading (faster loading)
-            int chunksThisFrame = Math.min(8, loadingChunksTotal - loadingChunksCompleted);
+            // Process only 1-2 chunks per frame to keep UI responsive
+            int chunksThisFrame = Math.min(2, loadingChunksTotal - loadingChunksCompleted);
             
             for (int i = 0; i < chunksThisFrame; i++) {
                 // Calculate chunk position in spiral
@@ -658,11 +662,16 @@ public class VoxelGame implements IGameLogic {
     
     /**
      * Loads chunks around the player with rate limiting.
+     * Separates generation from meshing to distribute work across frames.
      */
     private void loadChunksAroundPlayer(int centerChunkX, int centerChunkZ) {
-        for (int radius = 0; radius <= VIEW_DISTANCE && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; radius++) {
-            for (int dx = -radius; dx <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dx++) {
-                for (int dz = -radius; dz <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dz++) {
+        int chunksGenerated = 0;
+        int chunksMeshed = 0;
+        
+        // First pass: generate terrain (expensive)
+        for (int radius = 0; radius <= VIEW_DISTANCE && chunksGenerated < MAX_CHUNKS_PER_FRAME; radius++) {
+            for (int dx = -radius; dx <= radius && chunksGenerated < MAX_CHUNKS_PER_FRAME; dx++) {
+                for (int dz = -radius; dz <= radius && chunksGenerated < MAX_CHUNKS_PER_FRAME; dz++) {
                     if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) {
                         continue;
                     }
@@ -675,16 +684,34 @@ public class VoxelGame implements IGameLogic {
                     if (!chunk.isGenerated()) {
                         world.getGenerator().generateChunk(chunk, world);
                         chunk.setGenerated(true);
-                        chunksProcessedThisFrame++;
-                    }
-                    
-                    if (chunk.isDirty() && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME) {
-                        world.buildChunkMesh(chunk);
-                        chunksProcessedThisFrame++;
+                        chunksGenerated++;
                     }
                 }
             }
         }
+        
+        // Second pass: build meshes (also expensive but separate from generation)
+        for (int radius = 0; radius <= VIEW_DISTANCE && chunksMeshed < MAX_MESHES_PER_FRAME; radius++) {
+            for (int dx = -radius; dx <= radius && chunksMeshed < MAX_MESHES_PER_FRAME; dx++) {
+                for (int dz = -radius; dz <= radius && chunksMeshed < MAX_MESHES_PER_FRAME; dz++) {
+                    if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) {
+                        continue;
+                    }
+                    
+                    int chunkX = centerChunkX + dx;
+                    int chunkZ = centerChunkZ + dz;
+                    
+                    Chunk chunk = world.getChunk(chunkX, chunkZ);
+                    
+                    if (chunk != null && chunk.isGenerated() && chunk.isDirty()) {
+                        world.buildChunkMesh(chunk);
+                        chunksMeshed++;
+                    }
+                }
+            }
+        }
+        
+        chunksProcessedThisFrame = chunksGenerated + chunksMeshed;
     }
     
     @Override
