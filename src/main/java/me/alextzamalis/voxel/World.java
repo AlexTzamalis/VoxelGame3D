@@ -52,6 +52,9 @@ public class World {
     /** The texture atlas for block textures. */
     private TextureAtlas textureAtlas;
     
+    /** Reference to async chunk manager (for notifying on dirty chunks). */
+    private AsyncChunkManager asyncChunkManager;
+    
     /** Chunk height constant for external access. */
     public static final int CHUNK_HEIGHT = Chunk.HEIGHT;
     
@@ -262,6 +265,15 @@ public class World {
     }
     
     /**
+     * Sets the async chunk manager for this world.
+     * 
+     * @param asyncChunkManager The async chunk manager
+     */
+    public void setAsyncChunkManager(AsyncChunkManager asyncChunkManager) {
+        this.asyncChunkManager = asyncChunkManager;
+    }
+    
+    /**
      * Marks a chunk as dirty (needs mesh rebuild).
      * 
      * @param chunkX Chunk X coordinate
@@ -271,6 +283,11 @@ public class World {
         Chunk chunk = getChunk(chunkX, chunkZ);
         if (chunk != null) {
             chunk.markDirty();
+        }
+        
+        // Notify async chunk manager if available
+        if (asyncChunkManager != null) {
+            asyncChunkManager.markChunkDirty(chunkX, chunkZ);
         }
     }
     

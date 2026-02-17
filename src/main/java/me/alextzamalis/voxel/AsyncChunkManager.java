@@ -37,14 +37,14 @@ import me.alextzamalis.world.WorldGenerator;
  */
 public class AsyncChunkManager {
     
-    /** Number of worker threads for chunk generation. */
-    private static final int WORKER_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors() - 2);
+    /** Number of worker threads for chunk generation. Uses all available cores for maximum performance. */
+    private static final int WORKER_THREADS = Math.max(4, Runtime.getRuntime().availableProcessors());
     
-    /** Maximum chunks to generate per frame. */
-    private static final int MAX_GENERATIONS_PER_FRAME = 4;
+    /** Maximum chunks to generate per frame. Increased for better utilization. */
+    private static final int MAX_GENERATIONS_PER_FRAME = 8;
     
-    /** Maximum chunks to mesh per frame. */
-    private static final int MAX_MESHES_PER_FRAME = 2;
+    /** Maximum chunks to mesh per frame. Increased for better utilization. */
+    private static final int MAX_MESHES_PER_FRAME = 4;
     
     /** Maximum pending generation tasks. */
     private static final int MAX_PENDING_TASKS = 128;
@@ -420,6 +420,35 @@ public class AsyncChunkManager {
      */
     public int getGeneratingCount() {
         return generatingChunks.size() + pendingGeneration.size();
+    }
+    
+    /**
+     * Gets the total number of chunks generated so far.
+     * 
+     * @return Generated chunk count
+     */
+    public int getGeneratedChunkCount() {
+        return chunksGenerated.get();
+    }
+    
+    /**
+     * Gets the total number of chunks meshed so far.
+     * 
+     * @return Meshed chunk count
+     */
+    public int getMeshedChunkCount() {
+        return chunksMeshed.get();
+    }
+    
+    /**
+     * Checks if initial load is complete (all chunks in view distance are generated and meshed).
+     * 
+     * @return true if initial load is complete
+     */
+    public boolean isInitialLoadComplete() {
+        // Check if there are no pending generations and no chunks waiting to be meshed
+        // This is a simple heuristic - in practice, we'd track expected vs actual
+        return pendingGeneration.isEmpty() && chunksToMesh.isEmpty() && generatingChunks.isEmpty();
     }
     
     /**

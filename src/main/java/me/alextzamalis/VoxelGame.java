@@ -67,6 +67,12 @@ public class VoxelGame implements IGameLogic {
     /** Default max meshes per frame (used if settings not loaded). */
     private static final int DEFAULT_MAX_MESHES_PER_FRAME = 1;
     
+    /** Flag to indicate world needs OpenGL initialization (must be on main thread). */
+    private volatile boolean needsOpenGLInit = false;
+    
+    /** Async chunk manager for multithreaded chunk generation (uses all CPU cores). */
+    private me.alextzamalis.voxel.AsyncChunkManager asyncChunkManager;
+    
     /** Spiral index for chunk loading (tracks where we left off). */
     private int chunkLoadSpiralIndex = 0;
     
@@ -352,19 +358,29 @@ public class VoxelGame implements IGameLogic {
         world.setGenerator(new HeightmapGenerator(world.getSeed(), 60, 20, 0.015f));
         world.setTextureAtlas(textureAtlas);
         
+        // Initialize async chunk manager (uses all CPU cores for chunk generation)
+        int viewDist = getViewDistance();
+        asyncChunkManager = new me.alextzamalis.voxel.AsyncChunkManager(world, viewDist);
+        // Set async chunk manager in world so it can notify when chunks are marked dirty
+        world.setAsyncChunkManager(asyncChunkManager);
+        // Start the async chunk manager (it's already running, but this ensures it's active)
+        Logger.info("Async chunk manager initialized with view distance: %d (using %d worker threads)", 
+                   viewDist, Runtime.getRuntime().availableProcessors());
+        
         // Initialize block interaction
         blockInteraction = new BlockInteraction(world);
         
-        // Initialize block highlight
+        // Initialize block highlight (OpenGL resources - defer to render thread)
         blockHighlight = new BlockHighlight();
-        blockHighlight.init();
+        // Don't call init() here - it will be called on main thread in render()
+        needsOpenGLInit = true;
         
         // Set world reference for player physics
         playerController.setWorld(world);
         
-        // Initialize HUD
+        // Initialize HUD (OpenGL resources - defer to render thread)
         gameHUD = new GameHUD();
-        gameHUD.init(windowRef.getWidth(), windowRef.getHeight());
+        // Don't call init() here - it will be called on main thread in render()
         
         // Restore hotbar selection
         if (playerData != null) {
@@ -379,6 +395,12 @@ public class VoxelGame implements IGameLogic {
     private void cleanupWorld() {
         // Save world data before cleanup
         saveWorldData();
+        
+        // Shutdown async chunk manager
+        if (asyncChunkManager != null) {
+            asyncChunkManager.shutdown();
+            asyncChunkManager = null;
+        }
         
         if (gameHUD != null) {
             gameHUD.cleanup();
@@ -569,8 +591,39 @@ public class VoxelGame implements IGameLogic {
             }
         }
         
-        // Generate chunks incrementally - ONLY 1-2 per frame to stay responsive!
-        if (world != null && loadingChunksCompleted < loadingChunksTotal) {
+        // Use async chunk manager for loading (multithreaded, uses all CPU cores)
+        if (world != null && asyncChunkManager != null) {
+            Vector3f playerPos = playerController.getPosition();
+            int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
+            int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
+            
+            // Update async chunk manager (handles generation on worker threads)
+            asyncChunkManager.update(playerChunkX, playerChunkZ);
+            
+            // Update loading progress based on async manager stats
+            int generated = asyncChunkManager.getGeneratedChunkCount();
+            int meshed = asyncChunkManager.getMeshedChunkCount();
+            int total = loadingChunksTotal;
+            
+            if (total > 0) {
+                // Rough estimate: generation + meshing = 2x total chunks
+                float progress = Math.min(1.0f, (float) (generated + meshed) / (total * 2));
+                loadingScreen.setProgress(progress);
+                loadingScreen.setStatusMessage(String.format("Generating terrain... %d%% (Gen: %d/%d, Mesh: %d/%d)", 
+                                                             (int)(progress * 100), generated, total, meshed, total));
+                
+                // Check if loading is complete (all chunks generated and meshed)
+                if (generated >= total && meshed >= total) {
+                    loadingScreen.complete();
+                }
+            } else {
+                // Fallback: check if async manager reports complete
+                if (asyncChunkManager.isInitialLoadComplete()) {
+                    loadingScreen.complete();
+                }
+            }
+        } else if (world != null && loadingChunksCompleted < loadingChunksTotal) {
+            // Fallback: synchronous loading (slower, but works if async manager not available)
             Vector3f playerPos = playerController.getPosition();
             int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
             int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
@@ -656,23 +709,37 @@ public class VoxelGame implements IGameLogic {
         playerController.update(deltaTime, inputManager);
         
         // Update block highlight (raycasting)
-        blockHighlight.update(playerController.getCamera(), world);
+        if (blockHighlight != null) {
+            blockHighlight.update(playerController.getCamera(), world);
+        }
         
         // Update block interaction (breaking/placing)
-        blockInteraction.update(playerController.getCamera(), inputManager, deltaTime);
+        if (blockInteraction != null) {
+            blockInteraction.update(playerController.getCamera(), inputManager, deltaTime);
+        }
         
-        // Load chunks around player (rate-limited)
+        // Use async chunk manager for multithreaded chunk loading (uses all CPU cores)
         Vector3f playerPos = playerController.getPosition();
         int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
         int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
         
-        chunksProcessedThisFrame = 0;
-        loadChunksAroundPlayer(playerChunkX, playerChunkZ);
-        
-        // Unload distant chunks
-        int viewDist = getViewDistance();
-        int unloadDistance = (int) (viewDist * UNLOAD_DISTANCE_MULTIPLIER);
-        world.unloadDistantChunks(playerChunkX, playerChunkZ, unloadDistance);
+        if (asyncChunkManager != null) {
+            // Update async chunk manager (handles generation on worker threads)
+            // This uses all available CPU cores for parallel chunk generation
+            asyncChunkManager.update(playerChunkX, playerChunkZ);
+            
+            // Note: Chunks are automatically marked dirty by World.setBlock()
+            // AsyncChunkManager will rebuild meshes for dirty chunks
+        } else {
+            // Fallback to synchronous loading if async manager not available
+            chunksProcessedThisFrame = 0;
+            loadChunksAroundPlayer(playerChunkX, playerChunkZ);
+            
+            // Unload distant chunks
+            int viewDist = getViewDistance();
+            int unloadDistance = (int) (viewDist * UNLOAD_DISTANCE_MULTIPLIER);
+            world.unloadDistantChunks(playerChunkX, playerChunkZ, unloadDistance);
+        }
     }
     
     /**
@@ -804,6 +871,23 @@ public class VoxelGame implements IGameLogic {
             renderer.setClearColor(0.5f, 0.7f, 1.0f, 1.0f); // Sky blue for in-game
         } else if (currentState != GameState.LOADING) {
             renderer.setClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Dark menu background
+        }
+        
+        // Initialize OpenGL resources on main thread (if needed)
+        if (needsOpenGLInit && world != null) {
+            try {
+                if (blockHighlight != null) {
+                    blockHighlight.init();
+                }
+                if (gameHUD != null) {
+                    gameHUD.init(window.getWidth(), window.getHeight());
+                }
+                needsOpenGLInit = false;
+                Logger.info("OpenGL resources initialized on main thread");
+            } catch (Exception e) {
+                Logger.error("Failed to initialize OpenGL resources: %s", e.getMessage());
+                e.printStackTrace();
+            }
         }
         
         if (currentState == GameState.PLAYING && world != null && playerController != null) {

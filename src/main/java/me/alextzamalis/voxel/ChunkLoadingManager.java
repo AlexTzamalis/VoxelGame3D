@@ -40,14 +40,14 @@ import java.util.concurrent.TimeUnit;
  */
 public class ChunkLoadingManager {
     
-    /** Number of worker threads for chunk generation. */
-    private static final int WORKER_THREADS = 2;
+    /** Number of worker threads for chunk generation. Uses all available cores for maximum performance. */
+    private static final int WORKER_THREADS = Math.max(4, Runtime.getRuntime().availableProcessors());
     
-    /** Maximum chunks to process per frame (mesh uploads). */
-    private static final int MAX_MESH_UPLOADS_PER_FRAME = 4;
+    /** Maximum chunks to process per frame (mesh uploads). Increased for better utilization. */
+    private static final int MAX_MESH_UPLOADS_PER_FRAME = 8;
     
     /** Maximum chunks to unload per frame. */
-    private static final int MAX_UNLOADS_PER_FRAME = 2;
+    private static final int MAX_UNLOADS_PER_FRAME = 4;
     
     /** Unload distance multiplier (chunks beyond view_distance * this are unloaded). */
     private static final float UNLOAD_DISTANCE_MULTIPLIER = 1.5f;
