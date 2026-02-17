@@ -150,13 +150,32 @@ public class InputManager {
      * 
      * <p>This method calculates mouse deltas and should be called
      * once per frame before processing input.
+     * 
+     * @param window The window (needed for cursor centering when grabbed)
      */
-    public void update() {
-        // Calculate mouse delta
-        deltaX = mouseX - previousMouseX;
-        deltaY = mouseY - previousMouseY;
-        previousMouseX = mouseX;
-        previousMouseY = mouseY;
+    public void update(Window window) {
+        if (cursorGrabbed && window != null) {
+            // When cursor is grabbed, continuously center it and calculate delta
+            double centerX = window.getWidth() / 2.0;
+            double centerY = window.getHeight() / 2.0;
+            
+            // Calculate delta from center
+            deltaX = mouseX - centerX;
+            deltaY = mouseY - centerY;
+            
+            // Reset cursor to center
+            glfwSetCursorPos(windowHandle, centerX, centerY);
+            previousMouseX = centerX;
+            previousMouseY = centerY;
+            mouseX = centerX;
+            mouseY = centerY;
+        } else {
+            // Normal mode - calculate delta from previous position
+            deltaX = mouseX - previousMouseX;
+            deltaY = mouseY - previousMouseY;
+            previousMouseX = mouseX;
+            previousMouseY = mouseY;
+        }
     }
     
     /**
