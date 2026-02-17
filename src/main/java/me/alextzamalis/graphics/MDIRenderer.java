@@ -2,6 +2,8 @@ package me.alextzamalis.graphics;
 
 import me.alextzamalis.util.Logger;
 import me.alextzamalis.voxel.Chunk;
+import me.alextzamalis.voxel.LODManager;
+import me.alextzamalis.voxel.SimplifiedChunk;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 
@@ -45,6 +47,12 @@ public class MDIRenderer {
     /** Current list of visible chunks to render. */
     private final List<Chunk> visibleChunks;
     
+    /** Current list of visible simplified chunks to render. */
+    private final List<SimplifiedChunk> visibleSimplifiedChunks;
+    
+    /** LOD manager for accessing simplified chunks. */
+    private LODManager lodManager;
+    
     /**
      * Creates a new MDI renderer.
      * 
@@ -53,6 +61,16 @@ public class MDIRenderer {
     public MDIRenderer(GlobalBufferManager bufferManager) {
         this.bufferManager = bufferManager;
         this.visibleChunks = new ArrayList<>();
+        this.visibleSimplifiedChunks = new ArrayList<>();
+    }
+    
+    /**
+     * Sets the LOD manager for simplified chunk rendering.
+     * 
+     * @param lodManager The LOD manager
+     */
+    public void setLODManager(LODManager lodManager) {
+        this.lodManager = lodManager;
     }
     
     /**
@@ -63,7 +81,9 @@ public class MDIRenderer {
      */
     public void prepareFrame(Iterable<Chunk> chunks, FrustumCuller frustumCuller) {
         visibleChunks.clear();
+        visibleSimplifiedChunks.clear();
         
+        // Collect full chunks
         for (Chunk chunk : chunks) {
             // Check if chunk is in global buffer (MDI rendering)
             long chunkKey = getChunkKey(chunk.getChunkX(), chunk.getChunkZ());
@@ -78,10 +98,43 @@ public class MDIRenderer {
                 }
             }
         }
+        
+        // Collect simplified chunks if LOD is enabled
+        if (lodManager != null && lodManager.isEnabled()) {
+            // Get all simplified chunks from LOD manager
+            // We need to iterate through all possible chunk positions in view distance
+            // For now, we'll check simplified chunks that exist in the LOD manager
+            // This could be optimized by having LODManager provide an iterator
+            
+            // Check simplified chunks in the global buffer
+            for (var entry : bufferManager.getAllocations().entrySet()) {
+                long chunkKey = entry.getKey();
+                GlobalBufferManager.ChunkAllocation alloc = entry.getValue();
+                
+                // If allocation exists and is valid, check if it's a simplified chunk
+                if (alloc != null && alloc.valid && alloc.indexCount > 0) {
+                    int chunkX = (int) (chunkKey >> 32);
+                    int chunkZ = (int) chunkKey;
+                    
+                    SimplifiedChunk simplified = lodManager.getSimplifiedChunk(chunkX, chunkZ);
+                    if (simplified != null && simplified.isGenerated()) {
+                        // Check frustum (use simplified chunk dimensions)
+                        int width = simplified.getWidth() * simplified.getScale();
+                        int depth = simplified.getDepth() * simplified.getScale();
+                        
+                        if (frustumCuller.isChunkInFrustum(
+                                chunkX, chunkZ,
+                                width, SimplifiedChunk.HEIGHT, depth)) {
+                            visibleSimplifiedChunks.add(simplified);
+                        }
+                    }
+                }
+            }
+        }
     }
     
     /**
-     * Builds indirect draw commands for all visible chunks.
+     * Builds indirect draw commands for all visible chunks (full and simplified).
      * 
      * <p>Each draw command contains:
      * <ul>
@@ -89,13 +142,14 @@ public class MDIRenderer {
      *   <li>instanceCount: Number of instances (always 1 for chunks)</li>
      *   <li>firstIndex: Offset into index buffer</li>
      *   <li>baseVertex: Offset into vertex buffer (0, handled by index adjustment)</li>
-     *   <li>baseInstance: Instance ID (always 0)</li>
+     *   <li>baseInstance: Instance ID (0 for full chunks, 1 for simplified chunks for LOD transitions)</li>
      * </ul>
      * 
      * @return Number of draw commands created
      */
     public int buildIndirectCommands() {
-        if (visibleChunks.isEmpty()) {
+        int totalCommands = visibleChunks.size() + visibleSimplifiedChunks.size();
+        if (totalCommands == 0) {
             return 0;
         }
         
@@ -104,15 +158,16 @@ public class MDIRenderer {
         // - instanceCount (4 bytes): Number of instances (1)
         // - firstIndex (4 bytes): Offset into index buffer
         // - baseVertex (4 bytes): Vertex offset (0, indices are already adjusted)
-        // - baseInstance (4 bytes): Instance ID (0)
+        // - baseInstance (4 bytes): Instance ID (0 for full, 1 for simplified for shader LOD)
         
-        int commandCount = visibleChunks.size();
         int commandSize = 5; // 5 ints per command
         
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            IntBuffer commandBuffer = stack.mallocInt(commandCount * commandSize);
+            IntBuffer commandBuffer = stack.mallocInt(totalCommands * commandSize);
             
             int commandIndex = 0;
+            
+            // Add full chunks first
             for (Chunk chunk : visibleChunks) {
                 // Get chunk key
                 long chunkKey = getChunkKey(chunk.getChunkX(), chunk.getChunkZ());
@@ -123,13 +178,35 @@ public class MDIRenderer {
                     continue;
                 }
                 
-                // Build draw command
+                // Build draw command (baseInstance = 0 for full chunks)
                 int offset = commandIndex * commandSize;
                 commandBuffer.put(offset + 0, alloc.indexCount);      // count
                 commandBuffer.put(offset + 1, 1);                    // instanceCount
                 commandBuffer.put(offset + 2, alloc.indexOffset);   // firstIndex
                 commandBuffer.put(offset + 3, 0);                    // baseVertex (indices already adjusted)
-                commandBuffer.put(offset + 4, 0);                    // baseInstance
+                commandBuffer.put(offset + 4, 0);                    // baseInstance (0 = full chunk)
+                
+                commandIndex++;
+            }
+            
+            // Add simplified chunks (baseInstance = 1 for LOD shader transitions)
+            for (SimplifiedChunk simplified : visibleSimplifiedChunks) {
+                // Get chunk key
+                long chunkKey = getChunkKey(simplified.getChunkX(), simplified.getChunkZ());
+                GlobalBufferManager.ChunkAllocation alloc = bufferManager.getAllocations().get(chunkKey);
+                
+                if (alloc == null || !alloc.valid) {
+                    // Simplified chunk not in global buffer, skip
+                    continue;
+                }
+                
+                // Build draw command (baseInstance = 1 for simplified chunks)
+                int offset = commandIndex * commandSize;
+                commandBuffer.put(offset + 0, alloc.indexCount);      // count
+                commandBuffer.put(offset + 1, 1);                 // instanceCount
+                commandBuffer.put(offset + 2, alloc.indexOffset);   // firstIndex
+                commandBuffer.put(offset + 3, 0);                    // baseVertex (indices already adjusted)
+                commandBuffer.put(offset + 4, 1);                    // baseInstance (1 = simplified chunk for LOD)
                 
                 commandIndex++;
             }

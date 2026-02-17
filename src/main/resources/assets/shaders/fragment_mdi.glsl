@@ -5,6 +5,8 @@ in vec3 fragPos;
 in vec2 texCoord;
 in vec3 normal;
 in vec2 light; // blockLight, skyLight
+in float lodFactor; // LOD transition factor
+in float depthBias; // Depth bias (already applied in vertex shader)
 
 // Output color
 out vec4 fragColor;
@@ -14,6 +16,7 @@ uniform bool useTexture;
 uniform sampler2D textureSampler;
 uniform vec3 lightDirection;
 uniform vec3 ambientColor;
+uniform bool enableLODTransitions; // Enable smooth LOD transitions
 
 void main() {
     vec4 baseColor;
@@ -49,6 +52,17 @@ void main() {
     vec3 result = ambient + diffuse * 0.6;
     result += baseColor.rgb * blockLightIntensity * 0.3; // Block light contribution
     result += baseColor.rgb * skyLightIntensity * 0.5;  // Sky light contribution
+    
+    // Apply LOD transition effects (optional dithering/fading)
+    if (enableLODTransitions && lodFactor > 0.0) {
+        // Optional: Apply slight desaturation for distant chunks
+        float saturation = 1.0 - lodFactor * 0.2; // Slight desaturation
+        float gray = dot(result, vec3(0.299, 0.587, 0.114));
+        result = mix(vec3(gray), result, saturation);
+        
+        // Optional: Apply distance fog effect
+        // This could be enhanced with actual fog calculations
+    }
     
     fragColor = vec4(result, baseColor.a);
 }

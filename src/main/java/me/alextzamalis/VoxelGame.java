@@ -430,12 +430,20 @@ public class VoxelGame implements IGameLogic {
             int viewDist = getViewDistance();
             lodManager = new me.alextzamalis.voxel.LODManager(world, viewDist);
             
+            // Set LOD manager in MDI renderer
+            if (mdiRenderer != null) {
+                mdiRenderer.setLODManager(lodManager);
+            }
+            
             // Initialize simplified chunk mesh builder
             simplifiedChunkMeshBuilder = new me.alextzamalis.voxel.SimplifiedChunkMeshBuilder();
             simplifiedChunkMeshBuilder.setTextureAtlas(textureAtlas);
             if (globalBufferManager != null) {
                 simplifiedChunkMeshBuilder.setGlobalBufferManager(globalBufferManager);
             }
+            
+            // Set mesh builder in LOD manager
+            lodManager.setMeshBuilder(simplifiedChunkMeshBuilder);
             
             Logger.info("LOD system enabled - simplified chunks beyond %d chunk radius", viewDist);
         }
@@ -1081,6 +1089,15 @@ public class VoxelGame implements IGameLogic {
         shaderProgram.setUniform("useTexture", true);
         shaderProgram.setUniform("lightDirection", LIGHT_DIRECTION);
         shaderProgram.setUniform("ambientColor", AMBIENT_COLOR);
+        
+        // LOD transition uniforms
+        if (useMDIRendering && useLOD) {
+            shaderProgram.setUniform("cameraPosition", camera.getPosition());
+            shaderProgram.setUniform("lodTransitionDistance", (float) (getViewDistance() * Chunk.WIDTH));
+            shaderProgram.setUniform("enableLODTransitions", true);
+        } else {
+            shaderProgram.setUniform("enableLODTransitions", false);
+        }
         
         // Bind texture atlas
         textureAtlas.bind(0);

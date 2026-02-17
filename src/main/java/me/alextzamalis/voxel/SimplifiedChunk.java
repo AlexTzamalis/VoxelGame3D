@@ -87,6 +87,7 @@ public class SimplifiedChunk {
      * 
      * <p>This method samples the full chunk at regular intervals and stores
      * only the visible "shell" blocks (blocks with at least one exposed face).
+     * This dramatically reduces memory usage by not storing internal hidden blocks.
      * 
      * @param fullChunk The full chunk to simplify
      * @param scale The downsampling scale
@@ -102,7 +103,7 @@ public class SimplifiedChunk {
         int width = Chunk.WIDTH / scale;
         int depth = Chunk.DEPTH / scale;
         
-        // Downsample: sample every Nth block
+        // Downsample: sample every Nth block, but only store shell blocks
         for (int sy = 0; sy < HEIGHT; sy++) {
             for (int sz = 0; sz < depth; sz++) {
                 for (int sx = 0; sx < width; sx++) {
@@ -113,9 +114,17 @@ public class SimplifiedChunk {
                     // Get block from full chunk
                     short blockId = (short) fullChunk.getBlock(fullX, sy, fullZ);
                     
-                    // Only store if block is visible (not air, or check if it has exposed faces)
-                    // For now, store all non-air blocks (we can optimize to shell-only later)
-                    if (blockId != 0) {
+                    // Skip air blocks
+                    if (blockId == 0) {
+                        continue;
+                    }
+                    
+                    // Check if this is a shell block (has at least one exposed face)
+                    // For simplified chunks, we check if it's on the edge or has air neighbors
+                    boolean isShell = isShellBlock(fullChunk, fullX, sy, fullZ, scale);
+                    
+                    // Only store shell blocks (visible blocks)
+                    if (isShell) {
                         simplified.setBlock(sx, sy, sz, blockId);
                     }
                 }
@@ -124,6 +133,62 @@ public class SimplifiedChunk {
         
         simplified.generated = true;
         return simplified;
+    }
+    
+    /**
+     * Checks if a block in the full chunk is a shell block (visible from outside).
+     * 
+     * <p>A shell block is one that has at least one face exposed to air or is on
+     * the chunk boundary. This optimization stores only visible blocks, not
+     * internal hidden blocks.
+     * 
+     * @param fullChunk The full chunk
+     * @param x Local X coordinate in full chunk
+     * @param y Local Y coordinate
+     * @param z Local Z coordinate in full chunk
+     * @param scale The downsampling scale
+     * @return true if this is a shell block
+     */
+    private static boolean isShellBlock(Chunk fullChunk, int x, int y, int z, int scale) {
+        // Check if on chunk boundary (always shell)
+        if (x == 0 || x == Chunk.WIDTH - 1 || 
+            z == 0 || z == Chunk.DEPTH - 1 ||
+            y == 0 || y == Chunk.HEIGHT - 1) {
+            return true;
+        }
+        
+        // Check neighbors in the downsampled region
+        // If any neighbor in the scale x scale area is air, this is a shell block
+        int halfScale = scale / 2;
+        
+        // Check 6 directions (simplified check - just check immediate neighbors)
+        int[] dx = {-1, 1, 0, 0, 0, 0};
+        int[] dy = {0, 0, -1, 1, 0, 0};
+        int[] dz = {0, 0, 0, 0, -1, 1};
+        
+        for (int i = 0; i < 6; i++) {
+            int nx = x + dx[i] * scale;
+            int ny = y + dy[i];
+            int nz = z + dz[i] * scale;
+            
+            // Check bounds
+            if (nx < 0 || nx >= Chunk.WIDTH || 
+                ny < 0 || ny >= Chunk.HEIGHT ||
+                nz < 0 || nz >= Chunk.DEPTH) {
+                // Out of bounds = exposed face = shell block
+                return true;
+            }
+            
+            // Check if neighbor is air
+            int neighborBlock = fullChunk.getBlock(nx, ny, nz);
+            if (neighborBlock == 0) {
+                // Has air neighbor = exposed face = shell block
+                return true;
+            }
+        }
+        
+        // No exposed faces found = internal block = not shell
+        return false;
     }
     
     /**

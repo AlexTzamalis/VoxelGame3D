@@ -11,11 +11,15 @@ out vec3 fragPos;
 out vec2 texCoord;
 out vec3 normal;
 out vec2 light; // blockLight, skyLight
+out float lodFactor; // LOD transition factor (0 = full detail, 1 = simplified)
+out float depthBias; // Depth bias for LOD transitions (prevent z-fighting)
 
 // Uniforms
 uniform mat4 projectionMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 modelMatrix;
+uniform vec3 cameraPosition;  // For LOD distance calculation
+uniform float lodTransitionDistance; // Distance where LOD transitions occur
 
 // Unpacking constants (must match VertexPacker.java)
 const float POS_SCALE = 1024.0;
@@ -114,7 +118,24 @@ void main() {
     // Transform normal to world space
     normal = mat3(transpose(inverse(modelMatrix))) * normal;
     
-    // Calculate final position
-    gl_Position = projectionMatrix * viewMatrix * worldPos;
+    // Calculate distance from camera for LOD transitions
+    float distanceFromCamera = length(fragPos - cameraPosition);
+    
+    // Determine if this is a simplified chunk (baseInstance = 1)
+    // We use gl_InstanceID, but since we're using baseInstance in the draw command,
+    // we need to check if we're in a simplified chunk region
+    // For now, we'll use distance-based LOD factor
+    float lodDistance = lodTransitionDistance;
+    float lodFactorValue = clamp((distanceFromCamera - lodDistance * 0.8) / (lodDistance * 0.4), 0.0, 1.0);
+    lodFactor = lodFactorValue;
+    
+    // Apply depth bias for simplified chunks to prevent z-fighting
+    // Simplified chunks get a small depth bias to render slightly behind full chunks
+    depthBias = lodFactorValue * 0.0001; // Small bias for LOD transitions
+    
+    // Calculate final position with depth bias
+    vec4 clipPos = projectionMatrix * viewMatrix * worldPos;
+    clipPos.z += depthBias * clipPos.w; // Apply depth bias in clip space
+    gl_Position = clipPos;
 }
 

@@ -40,6 +40,9 @@ public class LODManager {
     /** Whether LOD is enabled. */
     private boolean enabled;
     
+    /** Simplified chunk mesh builder (set externally). */
+    private me.alextzamalis.voxel.SimplifiedChunkMeshBuilder meshBuilder;
+    
     /**
      * Creates a new LOD manager.
      * 
@@ -53,6 +56,15 @@ public class LODManager {
         this.enabled = true;
         
         Logger.info("LODManager initialized with view distance: %d chunks", viewDistance);
+    }
+    
+    /**
+     * Sets the simplified chunk mesh builder.
+     * 
+     * @param meshBuilder The mesh builder
+     */
+    public void setMeshBuilder(me.alextzamalis.voxel.SimplifiedChunkMeshBuilder meshBuilder) {
+        this.meshBuilder = meshBuilder;
     }
     
     /**
@@ -88,6 +100,18 @@ public class LODManager {
                     // Convert full chunk to simplified
                     SimplifiedChunk simplified = SimplifiedChunk.fromFullChunk(chunk, SimplifiedChunk.DEFAULT_SCALE);
                     simplifiedChunks.put(chunkKey, simplified);
+                    
+                    // Build mesh for simplified chunk if mesh builder is available
+                    if (meshBuilder != null) {
+                        boolean success = meshBuilder.buildMesh(simplified, chunkKey);
+                        if (success) {
+                            Logger.debug("Built mesh for SimplifiedChunk (%d, %d)", 
+                                       chunk.getChunkX(), chunk.getChunkZ());
+                        } else {
+                            Logger.warn("Failed to build mesh for SimplifiedChunk (%d, %d)", 
+                                      chunk.getChunkX(), chunk.getChunkZ());
+                        }
+                    }
                     
                     // Unload the full chunk to save memory
                     // Note: We keep the simplified version, so we don't call world.unloadChunk()
