@@ -129,10 +129,6 @@ public class Window {
             }
         }
         
-        // Make window visible and give it focus
-        glfwShowWindow(windowHandle);
-        glfwFocusWindow(windowHandle);
-        
         // Make the OpenGL context current
         glfwMakeContextCurrent(windowHandle);
         
@@ -141,8 +137,9 @@ public class Window {
             glfwSwapInterval(1);
         }
         
-        // Make the window visible
+        // Make window visible and give it focus (after context is current)
         glfwShowWindow(windowHandle);
+        glfwFocusWindow(windowHandle);
         
         // Initialize OpenGL bindings
         GL.createCapabilities();

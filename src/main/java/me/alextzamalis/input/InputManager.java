@@ -167,21 +167,22 @@ public class InputManager {
      */
     public void update(Window window) {
         if (cursorGrabbed && window != null) {
-            // When cursor is grabbed, calculate delta from previous position first
-            // This ensures we capture the movement before resetting
-            deltaX = mouseX - previousMouseX;
-            deltaY = mouseY - previousMouseY;
-            
-            // Then center the cursor for next frame
+            // When cursor is grabbed, calculate delta from center position
+            // The cursor is continuously centered, so we calculate relative to center
             double centerX = window.getWidth() / 2.0;
             double centerY = window.getHeight() / 2.0;
+            
+            // Calculate delta from center (cursor should be near center, but may have moved)
+            deltaX = mouseX - centerX;
+            deltaY = mouseY - centerY;
+            
+            // Reset cursor to center (this will trigger callback, but we've already captured delta)
             glfwSetCursorPos(windowHandle, centerX, centerY);
             
-            // Update previous position for next frame
+            // Update positions for next frame
+            // Note: The callback will update mouseX/mouseY to center, but we've already used them
             previousMouseX = centerX;
             previousMouseY = centerY;
-            mouseX = centerX;
-            mouseY = centerY;
         } else {
             // Normal mode - calculate delta from previous position
             deltaX = mouseX - previousMouseX;
