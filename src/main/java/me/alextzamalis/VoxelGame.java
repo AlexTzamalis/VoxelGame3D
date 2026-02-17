@@ -597,8 +597,10 @@ public class VoxelGame implements IGameLogic {
             int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
             int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
             
-            // Update async chunk manager (handles generation on worker threads)
-            asyncChunkManager.update(playerChunkX, playerChunkZ);
+            // Update chunk generation (can be called from update thread)
+            asyncChunkManager.updateGeneration(playerChunkX, playerChunkZ);
+            
+            // NOTE: Mesh building is done in render() method (main thread with OpenGL context)
             
             // Update loading progress based on async manager stats
             int generated = asyncChunkManager.getGeneratedChunkCount();
@@ -724,10 +726,11 @@ public class VoxelGame implements IGameLogic {
         int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
         
         if (asyncChunkManager != null) {
-            // Update async chunk manager (handles generation on worker threads)
+            // Update chunk generation (can be called from update thread)
             // This uses all available CPU cores for parallel chunk generation
-            asyncChunkManager.update(playerChunkX, playerChunkZ);
+            asyncChunkManager.updateGeneration(playerChunkX, playerChunkZ);
             
+            // NOTE: Mesh building is done in render() method (main thread with OpenGL context)
             // Note: Chunks are automatically marked dirty by World.setBlock()
             // AsyncChunkManager will rebuild meshes for dirty chunks
         } else {
@@ -888,6 +891,12 @@ public class VoxelGame implements IGameLogic {
                 Logger.error("Failed to initialize OpenGL resources: %s", e.getMessage());
                 e.printStackTrace();
             }
+        }
+        
+        // Build meshes on main thread (requires OpenGL context)
+        // This must be called from render thread, not update thread
+        if (asyncChunkManager != null && (currentState == GameState.PLAYING || currentState == GameState.LOADING)) {
+            asyncChunkManager.updateMeshes();
         }
         
         if (currentState == GameState.PLAYING && world != null && playerController != null) {

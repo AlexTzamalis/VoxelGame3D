@@ -109,12 +109,13 @@ public class AsyncChunkManager {
     }
     
     /**
-     * Updates the chunk manager. Call once per frame.
+     * Updates chunk generation (can be called from any thread).
+     * This handles chunk generation on worker threads.
      * 
      * @param playerChunkX Player's chunk X coordinate
      * @param playerChunkZ Player's chunk Z coordinate
      */
-    public void update(int playerChunkX, int playerChunkZ) {
+    public void updateGeneration(int playerChunkX, int playerChunkZ) {
         if (!running) return;
         
         // 1. Unload distant chunks
@@ -125,12 +126,33 @@ public class AsyncChunkManager {
         
         // 3. Check for completed generation tasks
         processCompletedGenerations();
+    }
+    
+    /**
+     * Updates mesh building (MUST be called from main thread with OpenGL context).
+     * This builds meshes for generated chunks.
+     */
+    public void updateMeshes() {
+        if (!running) return;
         
-        // 4. Build meshes for generated chunks (main thread only)
+        // Build meshes for generated chunks (main thread only - requires OpenGL)
         buildPendingMeshes();
         
-        // 5. Rebuild dirty chunk meshes
+        // Rebuild dirty chunk meshes (main thread only - requires OpenGL)
         rebuildDirtyMeshes();
+    }
+    
+    /**
+     * Updates the chunk manager. Call once per frame.
+     * NOTE: This method calls updateMeshes() which requires OpenGL context.
+     * Use updateGeneration() + updateMeshes() separately if you need to split threads.
+     * 
+     * @param playerChunkX Player's chunk X coordinate
+     * @param playerChunkZ Player's chunk Z coordinate
+     */
+    public void update(int playerChunkX, int playerChunkZ) {
+        updateGeneration(playerChunkX, playerChunkZ);
+        updateMeshes(); // This requires OpenGL context (main thread)
     }
     
     /**
