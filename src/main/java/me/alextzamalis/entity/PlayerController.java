@@ -80,6 +80,9 @@ public class PlayerController {
     /** Flag to track if F3 was pressed last frame (game mode toggle). */
     private boolean f3WasPressed;
     
+    /** Flag to track if Space was pressed last frame (for jump). */
+    private boolean spaceWasPressed;
+    
     /**
      * Creates a new player controller with default settings.
      */
@@ -93,6 +96,7 @@ public class PlayerController {
         this.leftMouseWasPressed = false;
         this.escapeWasPressed = false;
         this.f3WasPressed = false;
+        this.spaceWasPressed = false;
         
         updatePhysicsForGameMode();
     }
@@ -112,6 +116,7 @@ public class PlayerController {
         this.leftMouseWasPressed = false;
         this.escapeWasPressed = false;
         this.f3WasPressed = false;
+        this.spaceWasPressed = false;
         
         updatePhysicsForGameMode();
     }
@@ -227,10 +232,12 @@ public class PlayerController {
                 camera.move(0, -speed, 0);
             }
         } else {
-            // Survival mode - jumping only when on ground
-            if (inputManager.isKeyPressed(GLFW_KEY_SPACE)) {
+            // Survival mode - jumping only when on ground and key just pressed
+            boolean spacePressed = inputManager.isKeyPressed(GLFW_KEY_SPACE);
+            if (spacePressed && !spaceWasPressed && physics.isOnGround()) {
                 physics.jump();
             }
+            spaceWasPressed = spacePressed;
         }
         
         // Apply physics (gravity, collision)
