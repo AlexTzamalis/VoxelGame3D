@@ -1,15 +1,15 @@
 package me.alextzamalis.voxel;
 
-import me.alextzamalis.graphics.Mesh;
-import me.alextzamalis.graphics.TextureAtlas;
-import me.alextzamalis.util.Logger;
-import me.alextzamalis.world.WorldGenerator;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import me.alextzamalis.graphics.Mesh;
+import me.alextzamalis.graphics.TextureAtlas;
+import me.alextzamalis.util.Logger;
+import me.alextzamalis.world.WorldGenerator;
 
 /**
  * Manages the voxel world including chunks, generation, and block access.
