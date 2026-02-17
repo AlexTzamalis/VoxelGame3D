@@ -670,6 +670,7 @@ public class VoxelGame implements IGameLogic {
     /**
      * Loads chunks around the player with rate limiting.
      * Uses spiral pattern to load chunks incrementally without expensive nested loops.
+     * Prioritizes dirty chunks (from block breaking/placing) over new chunk generation.
      */
     private void loadChunksAroundPlayer(int centerChunkX, int centerChunkZ) {
         // Reset spiral if player moved to a new chunk
@@ -683,9 +684,36 @@ public class VoxelGame implements IGameLogic {
         int chunksMeshed = 0;
         int maxChunks = (VIEW_DISTANCE * 2 + 1) * (VIEW_DISTANCE * 2 + 1);
         
-        // Process chunks in spiral pattern (much faster than nested loops)
+        // FIRST: Process dirty chunks (from block breaking/placing) - highest priority
+        // This prevents freezes when breaking/placing blocks
+        // Limit how many chunks we check to avoid iterating over large collections
+        if (chunksMeshed < MAX_MESHES_PER_FRAME) {
+            int chunksChecked = 0;
+            int maxChecks = 20; // Don't check more than 20 chunks per frame
+            
+            for (Chunk chunk : world.getChunks()) {
+                if (chunksMeshed >= MAX_MESHES_PER_FRAME || chunksChecked >= maxChecks) break;
+                chunksChecked++;
+                
+                // Only process chunks within view distance
+                int dx = chunk.getChunkX() - centerChunkX;
+                int dz = chunk.getChunkZ() - centerChunkZ;
+                if (Math.abs(dx) > VIEW_DISTANCE || Math.abs(dz) > VIEW_DISTANCE) {
+                    continue;
+                }
+                
+                // Process dirty chunks first (user interactions)
+                if (chunk.isGenerated() && chunk.isDirty()) {
+                    world.buildChunkMesh(chunk);
+                    chunksMeshed++;
+                    break; // Only process one dirty chunk per frame to stay responsive
+                }
+            }
+        }
+        
+        // SECOND: Process new chunks in spiral pattern (only if we have capacity)
         while (chunkLoadSpiralIndex < maxChunks && 
-               (chunksGenerated < MAX_CHUNKS_PER_FRAME || chunksMeshed < MAX_MESHES_PER_FRAME)) {
+               chunksGenerated < MAX_CHUNKS_PER_FRAME) {
             
             int[] offset = getSpiralOffset(chunkLoadSpiralIndex);
             int chunkX = centerChunkX + offset[0];
@@ -697,23 +725,12 @@ public class VoxelGame implements IGameLogic {
                 continue;
             }
             
-            // Try to generate chunk if needed
-            if (chunksGenerated < MAX_CHUNKS_PER_FRAME) {
-                Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
-                if (!chunk.isGenerated()) {
-                    world.getGenerator().generateChunk(chunk, world);
-                    chunk.setGenerated(true);
-                    chunksGenerated++;
-                }
-            }
-            
-            // Try to mesh chunk if needed
-            if (chunksMeshed < MAX_MESHES_PER_FRAME) {
-                Chunk chunk = world.getChunk(chunkX, chunkZ);
-                if (chunk != null && chunk.isGenerated() && chunk.isDirty()) {
-                    world.buildChunkMesh(chunk);
-                    chunksMeshed++;
-                }
+            // Generate chunk if needed (skip if already generated)
+            Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
+            if (!chunk.isGenerated()) {
+                world.getGenerator().generateChunk(chunk, world);
+                chunk.setGenerated(true);
+                chunksGenerated++;
             }
             
             chunkLoadSpiralIndex++;
@@ -721,7 +738,7 @@ public class VoxelGame implements IGameLogic {
         
         // Reset spiral index if we've completed a full cycle
         if (chunkLoadSpiralIndex >= maxChunks) {
-            chunkLoadSpiralIndex = 0; // Start over, checking for new/dirty chunks
+            chunkLoadSpiralIndex = 0; // Start over, checking for new chunks
         }
         
         chunksProcessedThisFrame = chunksGenerated + chunksMeshed;
