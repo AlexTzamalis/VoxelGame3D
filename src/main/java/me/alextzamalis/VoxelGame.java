@@ -7,6 +7,8 @@ import me.alextzamalis.graphics.*;
 import me.alextzamalis.input.InputManager;
 import me.alextzamalis.util.Logger;
 import me.alextzamalis.util.ResourceLoader;
+import me.alextzamalis.physics.BlockInteraction;
+import me.alextzamalis.physics.BlockRaycast;
 import me.alextzamalis.voxel.Block;
 import me.alextzamalis.voxel.BlockFace;
 import me.alextzamalis.voxel.BlockRegistry;
@@ -69,6 +71,9 @@ public class VoxelGame implements IGameLogic {
     
     /** Frustum culler for visibility testing. */
     private FrustumCuller frustumCuller;
+    
+    /** Block interaction handler. */
+    private BlockInteraction blockInteraction;
     
     /** Debug display flag. */
     private boolean showDebug;
@@ -137,6 +142,9 @@ public class VoxelGame implements IGameLogic {
         world.setGenerator(new HeightmapGenerator(world.getSeed(), 60, 20, 0.015f));
         world.setTextureAtlas(textureAtlas);
         
+        // Initialize block interaction
+        blockInteraction = new BlockInteraction(world);
+        
         // Load initial chunks around player
         Logger.info("Generating initial chunks...");
         Vector3f playerPos = playerController.getPosition();
@@ -144,6 +152,7 @@ public class VoxelGame implements IGameLogic {
         
         Logger.info("Voxel Game initialized! %d chunks loaded.", world.getChunkCount());
         Logger.info("Controls: Click to look, WASD to move, Space/Shift up/down, Ctrl to sprint");
+        Logger.info("Left Click = break block, Right Click = place block, 1-7 = select block");
         Logger.info("F1 = wireframe, F3 = debug info, Escape = release mouse/quit");
     }
     
@@ -196,6 +205,9 @@ public class VoxelGame implements IGameLogic {
     @Override
     public void update(float deltaTime, InputManager inputManager) {
         playerController.update(deltaTime, inputManager);
+        
+        // Update block interaction (breaking/placing)
+        blockInteraction.update(playerController.getCamera(), inputManager, deltaTime);
         
         // Load chunks around player
         Vector3f playerPos = playerController.getPosition();
