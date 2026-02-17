@@ -189,6 +189,11 @@ public class PlayerController {
             return; // Can't update without input manager
         }
         
+        // Ensure deltaTime is reasonable (prevent division by zero or huge values)
+        if (deltaTime <= 0 || deltaTime > 1.0f) {
+            deltaTime = 0.016f; // Default to ~60fps if invalid
+        }
+        
         // Check sprint
         sprinting = inputManager.isKeyPressed(GLFW_KEY_LEFT_CONTROL);
         float currentSpeed = (gameMode == GameMode.CREATIVE ? CREATIVE_FLY_SPEED : movementSpeed);
@@ -197,22 +202,27 @@ public class PlayerController {
         // Calculate movement direction
         float dx = 0, dz = 0;
         
-        if (inputManager.isKeyPressed(GLFW_KEY_W)) {
+        boolean wPressed = inputManager.isKeyPressed(GLFW_KEY_W);
+        boolean sPressed = inputManager.isKeyPressed(GLFW_KEY_S);
+        boolean aPressed = inputManager.isKeyPressed(GLFW_KEY_A);
+        boolean dPressed = inputManager.isKeyPressed(GLFW_KEY_D);
+        
+        if (wPressed) {
             Vector3f forward = camera.getForward();
             dx -= forward.x * speed;
             dz -= forward.z * speed;
         }
-        if (inputManager.isKeyPressed(GLFW_KEY_S)) {
+        if (sPressed) {
             Vector3f forward = camera.getForward();
             dx += forward.x * speed;
             dz += forward.z * speed;
         }
-        if (inputManager.isKeyPressed(GLFW_KEY_A)) {
+        if (aPressed) {
             Vector3f right = camera.getRight();
             dx -= right.x * speed;
             dz -= right.z * speed;
         }
-        if (inputManager.isKeyPressed(GLFW_KEY_D)) {
+        if (dPressed) {
             Vector3f right = camera.getRight();
             dx += right.x * speed;
             dz += right.z * speed;

@@ -734,11 +734,22 @@ public class VoxelGame implements IGameLogic {
             return;
         }
         
+        if (inputManager == null) {
+            Logger.warn("updatePlaying: inputManager is null!");
+            return;
+        }
+        
         // Ensure cursor is grabbed (in case state change listener didn't fire)
-        if (inputManager != null && !inputManager.isCursorGrabbed() && windowRef != null) {
+        if (!inputManager.isCursorGrabbed() && windowRef != null) {
             inputManager.setCursorGrabbed(true);
             inputManager.centerCursor(windowRef);
             Logger.info("Cursor grabbed in updatePlaying (was not grabbed)");
+        }
+        
+        // Ensure deltaTime is valid
+        if (deltaTime <= 0 || deltaTime > 1.0f) {
+            Logger.warn("updatePlaying: Invalid deltaTime: %f, using default", deltaTime);
+            deltaTime = 0.05f; // Default to 20 UPS
         }
         
         playerController.update(deltaTime, inputManager);

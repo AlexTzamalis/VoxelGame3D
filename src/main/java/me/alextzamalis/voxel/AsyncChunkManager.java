@@ -40,11 +40,11 @@ public class AsyncChunkManager {
     /** Number of worker threads for chunk generation. Uses all available cores for maximum performance. */
     private static final int WORKER_THREADS = Math.max(4, Runtime.getRuntime().availableProcessors());
     
-    /** Maximum chunks to generate per frame. Reduced to prevent mesh pool exhaustion. */
-    private static final int MAX_GENERATIONS_PER_FRAME = 1;
+    /** Maximum chunks to generate per frame. Increased for faster world loading. */
+    private static final int MAX_GENERATIONS_PER_FRAME = 4;
     
-    /** Maximum chunks to mesh per frame. Reduced to prevent mesh pool exhaustion and frame drops. */
-    private static final int MAX_MESHES_PER_FRAME = 1;
+    /** Maximum chunks to mesh per frame. Increased for faster world loading. */
+    private static final int MAX_MESHES_PER_FRAME = 2;
     
     /** Frame counter for mesh building throttling. */
     private int meshBuildFrameCounter = 0;
