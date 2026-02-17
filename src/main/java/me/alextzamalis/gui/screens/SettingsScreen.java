@@ -50,16 +50,34 @@ public class SettingsScreen implements Screen {
     
     @Override
     public void init(GuiRenderer guiRenderer) throws Exception {
+        if (guiRenderer == null) {
+            throw new IllegalArgumentException("GuiRenderer cannot be null");
+        }
+        
         screenWidth = guiRenderer.getScreenWidth();
         screenHeight = guiRenderer.getScreenHeight();
         
+        // Safety check
+        if (screenWidth <= 0 || screenHeight <= 0) {
+            Logger.warn("SettingsScreen: Invalid dimensions from GuiRenderer, using defaults");
+            screenWidth = 1280;
+            screenHeight = 720;
+        }
+        
         createButtons();
         
-        Logger.info("SettingsScreen initialized");
+        Logger.info("SettingsScreen initialized (size: %dx%d)", screenWidth, screenHeight);
     }
     
     private void createButtons() {
         buttons.clear();
+        
+        // Safety check for valid screen dimensions
+        if (screenWidth <= 0 || screenHeight <= 0) {
+            Logger.warn("SettingsScreen: Invalid screen dimensions, using defaults");
+            screenWidth = 1280;
+            screenHeight = 720;
+        }
         
         float centerX = screenWidth / 2f;
         float startY = screenHeight / 2f - 80;
@@ -112,20 +130,31 @@ public class SettingsScreen implements Screen {
     
     @Override
     public void update(float deltaTime) {
-        // Update handled in update with input manager
+        // Buttons need InputManager to update, which is provided by VoxelGame
+        // This method is called by ScreenManager, but buttons are updated
+        // in the overloaded method called by VoxelGame
     }
     
     /**
-     * Updates with input manager.
+     * Updates with input manager (called by VoxelGame).
+     * 
+     * @param deltaTime Time since last update
+     * @param inputManager The input manager
      */
     public void update(float deltaTime, InputManager inputManager) {
-        for (Button button : buttons) {
-            button.update(inputManager);
+        if (inputManager != null) {
+            for (Button button : buttons) {
+                button.update(inputManager);
+            }
         }
     }
     
     @Override
     public void render(GuiRenderer guiRenderer) {
+        if (guiRenderer == null || screenWidth <= 0 || screenHeight <= 0) {
+            return; // Safety check
+        }
+        
         // Draw dark background
         guiRenderer.drawRect(0, 0, screenWidth, screenHeight, 0.1f, 0.1f, 0.15f, 1.0f);
         
@@ -136,7 +165,9 @@ public class SettingsScreen implements Screen {
         // Draw buttons (they render their own text)
         guiRenderer.setFontScale(2.0f);
         for (Button button : buttons) {
-            button.render(guiRenderer);
+            if (button != null) {
+                button.render(guiRenderer);
+            }
         }
         
         // Draw "coming soon" notice
