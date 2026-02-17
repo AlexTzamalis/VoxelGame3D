@@ -50,7 +50,10 @@ public class AsyncChunkManager {
     private int meshBuildFrameCounter = 0;
     
     /** Build meshes every N frames to prevent render thread blocking. */
-    private static final int MESH_BUILD_INTERVAL = 3; // Build meshes every 3 frames
+    private static final int MESH_BUILD_INTERVAL = 5; // Build meshes every 5 frames (more conservative)
+    
+    /** Maximum chunks to queue for meshing. Prevents unbounded queue growth. */
+    private static final int MAX_CHUNKS_TO_MESH_QUEUE = 20;
     
     /** Maximum pending generation tasks. Reduced to prevent mesh pool exhaustion. */
     private static final int MAX_PENDING_TASKS = 32;
@@ -328,11 +331,22 @@ public class AsyncChunkManager {
     
     /**
      * Builds meshes for generated chunks.
+     * Very conservative to prevent render thread blocking.
      */
     private void buildPendingMeshes() {
+        // Limit queue size to prevent unbounded growth
+        while (chunksToMesh.size() > MAX_CHUNKS_TO_MESH_QUEUE) {
+            Chunk chunk = chunksToMesh.poll();
+            if (chunk != null) {
+                Logger.debug("Dropping chunk from mesh queue (queue too large): (%d, %d)", 
+                           chunk.getChunkX(), chunk.getChunkZ());
+            }
+        }
+        
         int built = 0;
         
-        while (!chunksToMesh.isEmpty() && built < MAX_MESHES_PER_FRAME) {
+        // Only build ONE mesh per call to prevent blocking
+        if (!chunksToMesh.isEmpty() && built < MAX_MESHES_PER_FRAME) {
             Chunk chunk = chunksToMesh.poll();
             if (chunk != null && chunk.isGenerated()) {
                 try {
@@ -344,8 +358,11 @@ public class AsyncChunkManager {
                     // If mesh building fails (e.g., pool exhausted), re-queue the chunk
                     Logger.warn("Failed to build mesh for chunk (%d, %d): %s. Will retry later.", 
                                chunk.getChunkX(), chunk.getChunkZ(), e.getMessage());
-                    chunksToMesh.offer(chunk); // Re-queue for later
-                    break; // Stop trying this frame
+                    // Don't re-queue if queue is too large
+                    if (chunksToMesh.size() < MAX_CHUNKS_TO_MESH_QUEUE) {
+                        chunksToMesh.offer(chunk);
+                    }
+                    // Stop trying this frame
                 }
             }
         }

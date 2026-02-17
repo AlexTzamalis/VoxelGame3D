@@ -111,7 +111,9 @@ public class ScreenManager {
         
         if (currentScreen != null) {
             currentScreen.onShow();
-        } else {
+        } else if (newState != GameState.PLAYING) {
+            // PLAYING state doesn't need a screen (renders world directly)
+            // Only warn for other states
             Logger.warn("No screen registered for state: %s", newState);
         }
         

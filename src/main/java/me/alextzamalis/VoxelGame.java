@@ -908,7 +908,7 @@ public class VoxelGame implements IGameLogic {
             // During gameplay, only build meshes very rarely to prevent blocking
             // This allows the game to stay responsive
             gameplayMeshFrameCounter++;
-            if (gameplayMeshFrameCounter >= 15) { // Only every 15 frames (~1 per second at 60fps)
+            if (gameplayMeshFrameCounter >= 30) { // Only every 30 frames (~0.5 per second at 60fps)
                 asyncChunkManager.updateMeshes();
                 gameplayMeshFrameCounter = 0;
             }
