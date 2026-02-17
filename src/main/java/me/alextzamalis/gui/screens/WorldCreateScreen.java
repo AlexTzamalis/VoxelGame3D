@@ -177,28 +177,39 @@ public class WorldCreateScreen implements Screen {
         guiRenderer.drawRect(0, 0, screenWidth, screenHeight, 0.1f, 0.1f, 0.15f, 1.0f);
         
         // Draw title
-        guiRenderer.drawRect(screenWidth / 2f - 150, 50, 300, 40, 0.2f, 0.2f, 0.3f, 0.8f);
+        guiRenderer.setFontScale(3.0f);
+        guiRenderer.drawTextCentered("CREATE NEW WORLD", screenWidth / 2f, 50, 1.0f, 1.0f, 1.0f);
         
         float centerX = screenWidth / 2f;
         float centerY = screenHeight / 2f;
+        
+        // World name label
+        guiRenderer.setFontScale(2.0f);
+        guiRenderer.drawText("WORLD NAME:", centerX - 200, centerY - 110, 0.8f, 0.8f, 0.8f);
         
         // World name input area (placeholder)
         guiRenderer.drawRect(centerX - 200, centerY - 80, 400, 50, 0.15f, 0.15f, 0.2f, 1.0f);
         guiRenderer.drawRect(centerX - 195, centerY - 75, 390, 40, 0.25f, 0.25f, 0.3f, 1.0f);
         
-        // Label placeholders
-        guiRenderer.drawRect(centerX - 200, centerY - 110, 100, 20, 0.5f, 0.5f, 0.5f, 0.5f);
+        // Display world name
+        guiRenderer.drawText(worldName, centerX - 185, centerY - 65, 1.0f, 1.0f, 1.0f);
         
         // Seed display area (when custom)
         if (!useRandomSeed) {
+            guiRenderer.drawText("CUSTOM SEED:", centerX - 200, centerY + 80, 0.8f, 0.8f, 0.8f);
             guiRenderer.drawRect(centerX - 200, centerY + 100, 400, 50, 0.15f, 0.15f, 0.2f, 1.0f);
             guiRenderer.drawRect(centerX - 195, centerY + 105, 390, 40, 0.25f, 0.25f, 0.3f, 1.0f);
+            guiRenderer.drawText(String.valueOf(worldSeed), centerX - 185, centerY + 115, 1.0f, 1.0f, 1.0f);
         }
         
-        // Draw buttons
+        // Draw buttons (they render their own text)
         for (Button button : buttons) {
             button.render(guiRenderer);
         }
+        
+        // Draw hint text at bottom
+        guiRenderer.setFontScale(1.5f);
+        guiRenderer.drawTextCentered("TIP: RANDOM SEEDS CREATE UNIQUE WORLDS", screenWidth / 2f, screenHeight - 100, 0.5f, 0.5f, 0.5f);
     }
     
     @Override

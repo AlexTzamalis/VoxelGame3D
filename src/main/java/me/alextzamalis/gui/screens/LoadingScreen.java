@@ -133,8 +133,9 @@ public class LoadingScreen implements Screen {
         float centerX = screenWidth / 2f;
         float centerY = screenHeight / 2f;
         
-        // Draw loading title area
-        guiRenderer.drawRect(centerX - 200, centerY - 100, 400, 50, 0.15f, 0.15f, 0.2f, 0.8f);
+        // Draw loading title
+        guiRenderer.setFontScale(3.0f);
+        guiRenderer.drawTextCentered("LOADING WORLD", centerX, centerY - 100, 1.0f, 1.0f, 1.0f);
         
         // Progress bar background
         float barWidth = 400;
@@ -153,20 +154,25 @@ public class LoadingScreen implements Screen {
             guiRenderer.drawRect(barX, barY, fillWidth, barHeight / 2, 0.3f, 0.7f, 0.3f, 0.5f);
         }
         
+        // Progress percentage text
+        guiRenderer.setFontScale(2.0f);
+        int percent = (int) (progress * 100);
+        guiRenderer.drawTextCentered(percent + "%", centerX, barY + barHeight + 15, 1.0f, 1.0f, 1.0f);
+        
         // Animated loading dots
         int numDots = 3;
         float dotPhase = animationTime * 2;
         for (int i = 0; i < numDots; i++) {
             float dotAlpha = (float) (0.3f + 0.7f * Math.max(0, Math.sin(dotPhase - i * 0.5f)));
-            float dotY = centerY + 50 + (float) Math.sin(dotPhase - i * 0.5f) * 5;
+            float dotY = centerY + 60 + (float) Math.sin(dotPhase - i * 0.5f) * 5;
             guiRenderer.drawRect(centerX - 30 + i * 30, dotY, 15, 15, 0.5f, 0.5f, 0.5f, dotAlpha);
         }
         
-        // Status message area
-        guiRenderer.drawRect(centerX - 150, centerY + 80, 300, 25, 0.2f, 0.2f, 0.2f, 0.5f);
-        
-        // Progress percentage
-        guiRenderer.drawRect(centerX - 30, barY + barHeight + 10, 60, 20, 0.2f, 0.2f, 0.2f, 0.5f);
+        // Status message
+        guiRenderer.setFontScale(1.5f);
+        if (statusMessage != null) {
+            guiRenderer.drawTextCentered(statusMessage.toUpperCase(), centerX, centerY + 100, 0.7f, 0.7f, 0.7f);
+        }
     }
     
     @Override

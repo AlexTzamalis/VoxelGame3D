@@ -201,7 +201,8 @@ public class WorldSelectScreen implements Screen {
         guiRenderer.drawRect(0, 0, screenWidth, screenHeight, 0.1f, 0.1f, 0.15f, 1.0f);
         
         // Draw title
-        guiRenderer.drawRect(screenWidth / 2f - 150, 30, 300, 40, 0.2f, 0.2f, 0.3f, 0.8f);
+        guiRenderer.setFontScale(3.0f);
+        guiRenderer.drawTextCentered("SELECT WORLD", screenWidth / 2f, 40, 1.0f, 1.0f, 1.0f);
         
         // Draw world list area
         float listStartY = 100;
@@ -215,6 +216,7 @@ public class WorldSelectScreen implements Screen {
                             0.15f, 0.15f, 0.2f, 0.9f);
         
         // Draw world entries
+        guiRenderer.setFontScale(2.0f);
         for (int i = 0; i < worldEntries.size(); i++) {
             WorldEntry entry = worldEntries.get(i);
             float entryY = listStartY + i * (entryHeight + 5);
@@ -229,12 +231,24 @@ public class WorldSelectScreen implements Screen {
             // World icon placeholder
             guiRenderer.drawRect(listX + 5, entryY + 5, 40, 40, 0.4f, 0.6f, 0.4f, 1.0f);
             
-            // Text placeholders (will be replaced with actual text rendering)
-            guiRenderer.drawRect(listX + 55, entryY + 10, 200, 15, 0.5f, 0.5f, 0.5f, 0.5f);
-            guiRenderer.drawRect(listX + 55, entryY + 30, 100, 10, 0.4f, 0.4f, 0.4f, 0.5f);
+            // World name
+            guiRenderer.drawText(entry.name, listX + 55, entryY + 8, 1.0f, 1.0f, 1.0f);
+            
+            // Last played info
+            guiRenderer.setFontScale(1.5f);
+            guiRenderer.drawText("SEED: " + entry.seed + " - " + entry.lastPlayed, listX + 55, entryY + 30, 0.6f, 0.6f, 0.6f);
+            guiRenderer.setFontScale(2.0f);
         }
         
-        // Draw buttons
+        // Draw "no worlds" message if empty
+        if (worldEntries.isEmpty()) {
+            guiRenderer.drawTextCentered("NO WORLDS FOUND", screenWidth / 2f, listStartY + 50, 0.5f, 0.5f, 0.5f);
+            guiRenderer.setFontScale(1.5f);
+            guiRenderer.drawTextCentered("CLICK CREATE NEW WORLD TO START", screenWidth / 2f, listStartY + 80, 0.4f, 0.4f, 0.4f);
+            guiRenderer.setFontScale(2.0f);
+        }
+        
+        // Draw buttons (they render their own text)
         for (Button button : buttons) {
             button.render(guiRenderer);
         }

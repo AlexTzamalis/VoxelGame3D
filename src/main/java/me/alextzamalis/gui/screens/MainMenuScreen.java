@@ -166,22 +166,11 @@ public class MainMenuScreen implements Screen {
         guiRenderer.setFontScale(4.0f);
         guiRenderer.drawTextCentered("VOXEL GAME 3D", screenWidth / 2f, titleY - 20, 0.4f, 0.8f, 0.4f);
         
-        // Draw buttons
+        // Draw buttons (they render their own text)
         guiRenderer.setFontScale(2.0f);
         for (Button button : buttons) {
             button.render(guiRenderer);
         }
-        
-        // Draw button labels
-        float centerX = screenWidth / 2f;
-        float startY = screenHeight / 2f - 20;
-        float buttonHeight = BUTTON_HEIGHT;
-        float spacing = BUTTON_SPACING;
-        
-        guiRenderer.drawTextCentered("SINGLEPLAYER", centerX, startY + buttonHeight / 2 - 8, 1.0f, 1.0f, 1.0f);
-        guiRenderer.drawTextCentered("MULTIPLAYER", centerX, startY + buttonHeight + spacing + buttonHeight / 2 - 8, 0.5f, 0.5f, 0.5f);
-        guiRenderer.drawTextCentered("SETTINGS", centerX, startY + (buttonHeight + spacing) * 2 + buttonHeight / 2 - 8, 1.0f, 1.0f, 1.0f);
-        guiRenderer.drawTextCentered("QUIT GAME", centerX, startY + (buttonHeight + spacing) * 3 + buttonHeight / 2 - 8, 1.0f, 1.0f, 1.0f);
         
         // Draw version info (bottom left)
         guiRenderer.setFontScale(1.5f);
