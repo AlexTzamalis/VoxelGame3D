@@ -46,6 +46,12 @@ public class VoxelGame implements IGameLogic {
     /** View distance in chunks. */
     private static final int VIEW_DISTANCE = 4;
     
+    /** Unload distance multiplier (chunks beyond VIEW_DISTANCE * this are unloaded). */
+    private static final float UNLOAD_DISTANCE_MULTIPLIER = 1.5f;
+    
+    /** Maximum chunks to generate/rebuild per frame (prevents frame drops). */
+    private static final int MAX_CHUNKS_PER_FRAME = 2;
+    
     /** Block texture tile size in pixels. */
     private static final int TEXTURE_TILE_SIZE = 16;
     
@@ -85,11 +91,15 @@ public class VoxelGame implements IGameLogic {
     /** F1 key state for toggle. */
     private boolean f1WasPressed;
     
+    /** Frame counter for chunk loading rate limiting. */
+    private int chunksProcessedThisFrame;
+    
     /**
      * Creates a new voxel game.
      */
     public VoxelGame() {
         this.f1WasPressed = false;
+        this.chunksProcessedThisFrame = 0;
     }
     
     @Override
@@ -211,9 +221,55 @@ public class VoxelGame implements IGameLogic {
         // Update block interaction (breaking/placing)
         blockInteraction.update(playerController.getCamera(), inputManager, deltaTime);
         
-        // Load chunks around player
+        // Load chunks around player (rate-limited to prevent frame drops)
         Vector3f playerPos = playerController.getPosition();
-        world.loadChunksAround((int) playerPos.x, (int) playerPos.z, VIEW_DISTANCE);
+        int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
+        int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
+        
+        // Reset frame counter
+        chunksProcessedThisFrame = 0;
+        
+        // Load chunks in a spiral pattern from player outward
+        loadChunksAroundPlayer(playerChunkX, playerChunkZ);
+        
+        // Unload distant chunks to free memory
+        int unloadDistance = (int) (VIEW_DISTANCE * UNLOAD_DISTANCE_MULTIPLIER);
+        world.unloadDistantChunks(playerChunkX, playerChunkZ, unloadDistance);
+    }
+    
+    /**
+     * Loads chunks around the player with rate limiting.
+     */
+    private void loadChunksAroundPlayer(int centerChunkX, int centerChunkZ) {
+        // Load in a spiral pattern (closer chunks first)
+        for (int radius = 0; radius <= VIEW_DISTANCE && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; radius++) {
+            for (int dx = -radius; dx <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dx++) {
+                for (int dz = -radius; dz <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dz++) {
+                    // Only process chunks on the current ring (optimization)
+                    if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) {
+                        continue;
+                    }
+                    
+                    int chunkX = centerChunkX + dx;
+                    int chunkZ = centerChunkZ + dz;
+                    
+                    Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
+                    
+                    // Generate if needed
+                    if (!chunk.isGenerated()) {
+                        world.getGenerator().generateChunk(chunk, world);
+                        chunk.setGenerated(true);
+                        chunksProcessedThisFrame++;
+                    }
+                    
+                    // Build mesh if dirty
+                    if (chunk.isDirty() && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME) {
+                        world.buildChunkMesh(chunk);
+                        chunksProcessedThisFrame++;
+                    }
+                }
+            }
+        }
     }
     
     @Override
