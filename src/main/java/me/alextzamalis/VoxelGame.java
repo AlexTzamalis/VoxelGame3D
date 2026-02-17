@@ -727,7 +727,14 @@ public class VoxelGame implements IGameLogic {
     /**
      * Updates the playing state.
      */
+    private static int updatePlayingCallCount = 0;
+    
     private void updatePlaying(float deltaTime, InputManager inputManager) {
+        updatePlayingCallCount++;
+        if (updatePlayingCallCount % 100 == 0) { // Log every 100 calls
+            Logger.debug("updatePlaying called %d times, deltaTime=%.4f", updatePlayingCallCount, deltaTime);
+        }
+        
         if (playerController == null || world == null) {
             Logger.warn("updatePlaying: playerController or world is null (playerController=%s, world=%s)", 
                        playerController != null, world != null);

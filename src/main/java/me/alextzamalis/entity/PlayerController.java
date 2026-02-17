@@ -4,6 +4,7 @@ import me.alextzamalis.core.Window;
 import me.alextzamalis.graphics.Camera;
 import me.alextzamalis.input.InputManager;
 import me.alextzamalis.physics.PlayerPhysics;
+import me.alextzamalis.util.Logger;
 import me.alextzamalis.voxel.World;
 import org.joml.Vector3f;
 
@@ -206,6 +207,12 @@ public class PlayerController {
         boolean sPressed = inputManager.isKeyPressed(GLFW_KEY_S);
         boolean aPressed = inputManager.isKeyPressed(GLFW_KEY_A);
         boolean dPressed = inputManager.isKeyPressed(GLFW_KEY_D);
+        
+        // Debug: Log if keys are pressed (only occasionally to avoid spam)
+        if ((wPressed || sPressed || aPressed || dPressed) && Math.random() < 0.01) {
+            Logger.debug("Movement keys: W=%s S=%s A=%s D=%s, speed=%.2f, deltaTime=%.4f", 
+                        wPressed, sPressed, aPressed, dPressed, speed, deltaTime);
+        }
         
         if (wPressed) {
             Vector3f forward = camera.getForward();
