@@ -79,7 +79,7 @@ public class AsyncChunkManager {
     /** Current view distance in chunks. */
     private int viewDistance;
     
-    /** Unload distance (chunks beyond this are unloaded). */
+    /** Unload distance (chunks beyond this are unloaded). Increased to prevent premature unloading. */
     private int unloadDistance;
     
     /** Statistics. */
@@ -98,7 +98,9 @@ public class AsyncChunkManager {
     public AsyncChunkManager(World world, int viewDistance) {
         this.world = world;
         this.viewDistance = viewDistance;
-        this.unloadDistance = (int) (viewDistance * 1.5f);
+        // Increase unload distance to 2.5x view distance to prevent chunks from being unloaded too close
+        // This prevents chunks from disappearing when breaking blocks near the edge
+        this.unloadDistance = (int) (viewDistance * 2.5f);
         
         this.executorService = Executors.newFixedThreadPool(WORKER_THREADS, r -> {
             Thread t = new Thread(r, "ChunkGenerator");
@@ -191,7 +193,15 @@ public class AsyncChunkManager {
             int dz = chunk.getChunkZ() - playerChunkZ;
             int distSq = dx * dx + dz * dz;
             
-            if (distSq > unloadDistance * unloadDistance) {
+            // Only unload if:
+            // 1. Chunk is beyond unload distance
+            // 2. Chunk is not dirty (not being modified)
+            // 3. Chunk is not in the mesh queue (not being processed)
+            long key = getChunkKey(chunk.getChunkX(), chunk.getChunkZ());
+            boolean isDirty = dirtyChunks.contains(key);
+            boolean isInMeshQueue = chunksToMesh.contains(chunk);
+            
+            if (distSq > unloadDistance * unloadDistance && !isDirty && !isInMeshQueue) {
                 toUnload.add(chunk);
             }
         }
@@ -207,7 +217,7 @@ public class AsyncChunkManager {
             }
             dirtyChunks.remove(key);
             
-            // Unload the chunk
+            // Unload the chunk (this will release its mesh back to the pool)
             world.unloadChunk(chunk.getChunkX(), chunk.getChunkZ());
         }
     }
@@ -479,7 +489,9 @@ public class AsyncChunkManager {
      */
     public void setViewDistance(int viewDistance) {
         this.viewDistance = viewDistance;
-        this.unloadDistance = (int) (viewDistance * 1.5f);
+        // Increase unload distance to 2.5x view distance to prevent chunks from being unloaded too close
+        // This prevents chunks from disappearing when breaking blocks near the edge
+        this.unloadDistance = (int) (viewDistance * 2.5f);
     }
     
     /**
