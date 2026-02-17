@@ -1,5 +1,11 @@
 plugins {
     id 'java'
+    id 'application'
+}
+
+// Main class for the application
+application {
+    mainClass = 'me.alextzamalis.Main'
 }
 
 group = 'me.alextzamalis'
@@ -49,6 +55,9 @@ dependencies {
     runtimeOnly "org.lwjgl:lwjgl-openal::$lwjglNatives"
     runtimeOnly "org.lwjgl:lwjgl-opengl::$lwjglNatives"
     runtimeOnly "org.lwjgl:lwjgl-stb::$lwjglNatives"
+    
+    // JOML - Java OpenGL Math Library
+    implementation 'org.joml:joml:1.10.5'
     
     // Testing
     testImplementation platform('org.junit:junit-bom:5.10.0')
