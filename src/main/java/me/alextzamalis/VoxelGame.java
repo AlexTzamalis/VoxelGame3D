@@ -4,6 +4,7 @@ import me.alextzamalis.core.IGameLogic;
 import me.alextzamalis.core.Window;
 import me.alextzamalis.entity.PlayerController;
 import me.alextzamalis.graphics.*;
+import me.alextzamalis.graphics.PooledMesh;
 import me.alextzamalis.gui.GameState;
 import me.alextzamalis.gui.ScreenManager;
 import me.alextzamalis.gui.hud.GameHUD;
@@ -570,7 +571,7 @@ public class VoxelGame implements IGameLogic {
                 break;
                 
             default:
-                screenManager.update(deltaTime);
+                // No special handling needed
                 break;
         }
     }
@@ -954,9 +955,18 @@ public class VoxelGame implements IGameLogic {
         // Update frustum culler
         frustumCuller.update(camera.getProjectionMatrix(), camera.getViewMatrix());
         
-        // Render visible chunks
+        // Render visible chunks (using PooledMesh)
         for (Chunk chunk : world.getChunks()) {
-            if (chunk.hasMesh()) {
+            // Check for PooledMesh first (new system), then fallback to Mesh (old system)
+            PooledMesh pooledMesh = chunk.getPooledMesh();
+            if (pooledMesh != null && pooledMesh.hasData()) {
+                if (frustumCuller.isChunkInFrustum(
+                        chunk.getChunkX(), chunk.getChunkZ(),
+                        Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
+                    pooledMesh.render();
+                }
+            } else if (chunk.hasMesh()) {
+                // Fallback to old Mesh system for compatibility
                 if (frustumCuller.isChunkInFrustum(
                         chunk.getChunkX(), chunk.getChunkZ(),
                         Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
