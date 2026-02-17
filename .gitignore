@@ -42,6 +42,15 @@ bin/
 ### Mac OS ###
 .DS_Store
 
+### JVM Crash Logs ###
+hs_err_pid*.log
+replay_pid*.log
+
+### Game Logs ###
+logs/
+*.log
+!gradle-wrapper.properties
+
 ### Documentation ###
 # Ignore all markdown files except README.md
 *.md
