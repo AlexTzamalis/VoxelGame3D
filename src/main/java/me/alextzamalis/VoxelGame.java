@@ -19,6 +19,7 @@ import me.alextzamalis.voxel.BlockRegistry;
 import me.alextzamalis.voxel.Chunk;
 import me.alextzamalis.voxel.World;
 import me.alextzamalis.world.HeightmapGenerator;
+import me.alextzamalis.world.ZoneGenerator;
 import me.alextzamalis.world.PlayerData;
 import me.alextzamalis.world.WorldMetadata;
 import me.alextzamalis.world.WorldSaveManager;
@@ -425,7 +426,13 @@ public class VoxelGame implements IGameLogic {
             Logger.info("MDI rendering enabled - using Multi-Draw Indirect for chunk rendering");
         }
         
-        // Initialize LOD manager for distant chunk simplification
+        // Initialize world with zone-based generator (Hytale-style curated proceduralism)
+        world = new World(pendingWorldName, pendingWorldSeed);
+        // Use ZoneGenerator for curated proceduralism (prefabs, patterns, zones)
+        world.setGenerator(new ZoneGenerator(world.getSeed()));
+        Logger.info("Using ZoneGenerator for Hytale-style world generation (prefabs, patterns, zones)");
+        
+        // Initialize LOD manager for distant chunk simplification (after world is created)
         if (useLOD) {
             int viewDist = getViewDistance();
             lodManager = new me.alextzamalis.voxel.LODManager(world, viewDist);
@@ -447,10 +454,6 @@ public class VoxelGame implements IGameLogic {
             
             Logger.info("LOD system enabled - simplified chunks beyond %d chunk radius", viewDist);
         }
-        
-        // Initialize world with heightmap generator
-        world = new World(pendingWorldName, pendingWorldSeed);
-        world.setGenerator(new HeightmapGenerator(world.getSeed(), 60, 20, 0.015f));
         world.setTextureAtlas(textureAtlas);
         
         // Set global buffer manager in mesh builder if MDI is enabled
