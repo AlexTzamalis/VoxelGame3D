@@ -73,6 +73,9 @@ public class VoxelGame implements IGameLogic {
     /** Async chunk manager for multithreaded chunk generation (uses all CPU cores). */
     private me.alextzamalis.voxel.AsyncChunkManager asyncChunkManager;
     
+    /** Frame counter for throttling mesh building during gameplay. */
+    private int gameplayMeshFrameCounter = 0;
+    
     /** Spiral index for chunk loading (tracks where we left off). */
     private int chunkLoadSpiralIndex = 0;
     
@@ -728,9 +731,11 @@ public class VoxelGame implements IGameLogic {
         if (asyncChunkManager != null) {
             // Update chunk generation (can be called from update thread)
             // This uses all available CPU cores for parallel chunk generation
+            // Throttled to prevent overload
             asyncChunkManager.updateGeneration(playerChunkX, playerChunkZ);
             
             // NOTE: Mesh building is done in render() method (main thread with OpenGL context)
+            // It's throttled to every 3 frames to prevent render thread blocking
             // Note: Chunks are automatically marked dirty by World.setBlock()
             // AsyncChunkManager will rebuild meshes for dirty chunks
         } else {
@@ -895,8 +900,17 @@ public class VoxelGame implements IGameLogic {
         
         // Build meshes on main thread (requires OpenGL context)
         // This must be called from render thread, not update thread
-        if (asyncChunkManager != null && (currentState == GameState.PLAYING || currentState == GameState.LOADING)) {
+        if (asyncChunkManager != null && currentState == GameState.LOADING) {
+            // During loading, build meshes more frequently
             asyncChunkManager.updateMeshes();
+        } else if (asyncChunkManager != null && currentState == GameState.PLAYING) {
+            // During gameplay, only build meshes very rarely to prevent blocking
+            // This allows the game to stay responsive
+            gameplayMeshFrameCounter++;
+            if (gameplayMeshFrameCounter >= 15) { // Only every 15 frames (~1 per second at 60fps)
+                asyncChunkManager.updateMeshes();
+                gameplayMeshFrameCounter = 0;
+            }
         }
         
         if (currentState == GameState.PLAYING && world != null && playerController != null) {

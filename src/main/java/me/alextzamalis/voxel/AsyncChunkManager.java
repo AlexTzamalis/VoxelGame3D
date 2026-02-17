@@ -41,10 +41,16 @@ public class AsyncChunkManager {
     private static final int WORKER_THREADS = Math.max(4, Runtime.getRuntime().availableProcessors());
     
     /** Maximum chunks to generate per frame. Reduced to prevent mesh pool exhaustion. */
-    private static final int MAX_GENERATIONS_PER_FRAME = 2;
+    private static final int MAX_GENERATIONS_PER_FRAME = 1;
     
-    /** Maximum chunks to mesh per frame. Reduced to prevent mesh pool exhaustion. */
+    /** Maximum chunks to mesh per frame. Reduced to prevent mesh pool exhaustion and frame drops. */
     private static final int MAX_MESHES_PER_FRAME = 1;
+    
+    /** Frame counter for mesh building throttling. */
+    private int meshBuildFrameCounter = 0;
+    
+    /** Build meshes every N frames to prevent render thread blocking. */
+    private static final int MESH_BUILD_INTERVAL = 3; // Build meshes every 3 frames
     
     /** Maximum pending generation tasks. Reduced to prevent mesh pool exhaustion. */
     private static final int MAX_PENDING_TASKS = 32;
@@ -131,14 +137,24 @@ public class AsyncChunkManager {
     /**
      * Updates mesh building (MUST be called from main thread with OpenGL context).
      * This builds meshes for generated chunks.
+     * 
+     * <p>Throttled to prevent blocking the render thread.
      */
     public void updateMeshes() {
         if (!running) return;
+        
+        // Throttle mesh building to prevent render thread blocking
+        meshBuildFrameCounter++;
+        if (meshBuildFrameCounter < MESH_BUILD_INTERVAL) {
+            return; // Skip this frame
+        }
+        meshBuildFrameCounter = 0;
         
         // Build meshes for generated chunks (main thread only - requires OpenGL)
         buildPendingMeshes();
         
         // Rebuild dirty chunk meshes (main thread only - requires OpenGL)
+        // Only rebuild one dirty chunk per cycle to prevent blocking
         rebuildDirtyMeshes();
     }
     
@@ -337,21 +353,38 @@ public class AsyncChunkManager {
     
     /**
      * Rebuilds meshes for dirty chunks.
+     * Only rebuilds one chunk per call to prevent render thread blocking.
      */
     private void rebuildDirtyMeshes() {
-        int rebuilt = 0;
+        if (dirtyChunks.isEmpty()) {
+            return;
+        }
         
+        // Only rebuild ONE dirty chunk per cycle to prevent blocking
         Iterator<Long> it = dirtyChunks.iterator();
-        while (it.hasNext() && rebuilt < MAX_MESHES_PER_FRAME) {
+        if (it.hasNext()) {
             Long key = it.next();
             it.remove();
             
-            // Find the chunk
+            // Find the chunk (limit search to prevent blocking)
+            int checked = 0;
+            int maxChecks = 50; // Don't check more than 50 chunks
+            
             for (Chunk chunk : world.getChunks()) {
+                if (checked++ >= maxChecks) {
+                    break; // Prevent blocking on large chunk collections
+                }
+                
                 if (getChunkKey(chunk.getChunkX(), chunk.getChunkZ()) == key) {
                     if (chunk.isDirty()) {
-                        world.buildChunkMeshPooled(chunk);
-                        rebuilt++;
+                        try {
+                            world.buildChunkMeshPooled(chunk);
+                        } catch (Exception e) {
+                            Logger.warn("Failed to rebuild mesh for dirty chunk (%d, %d): %s", 
+                                       chunk.getChunkX(), chunk.getChunkZ(), e.getMessage());
+                            // Re-add to dirty set for retry
+                            dirtyChunks.add(key);
+                        }
                     }
                     break;
                 }
