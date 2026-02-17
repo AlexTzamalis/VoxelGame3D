@@ -1,6 +1,8 @@
 package me.alextzamalis.voxel;
 
 import me.alextzamalis.graphics.Mesh;
+import me.alextzamalis.graphics.MeshPool;
+import me.alextzamalis.graphics.PooledMesh;
 import me.alextzamalis.graphics.TextureAtlas;
 
 /**
@@ -161,6 +163,80 @@ public class ChunkMeshBuilder {
         System.arraycopy(indices, 0, finalIndices, 0, indIndex);
         
         return new Mesh(finalPositions, finalTexCoords, finalNormals, finalTints, finalIndices);
+    }
+    
+    /**
+     * Builds mesh data into a PooledMesh for memory efficiency.
+     * 
+     * @param chunk The chunk to build a mesh for
+     * @param pooledMesh The pooled mesh to update (or null to acquire from pool)
+     * @return The updated pooled mesh, or null if chunk has no visible faces
+     */
+    public PooledMesh buildPooledMesh(Chunk chunk, PooledMesh pooledMesh) {
+        // Reset indices
+        posIndex = 0;
+        texIndex = 0;
+        normIndex = 0;
+        tintIndex = 0;
+        indIndex = 0;
+        vertexCount = 0;
+        
+        // Iterate through all blocks in the chunk
+        for (int y = 0; y < Chunk.HEIGHT; y++) {
+            for (int z = 0; z < Chunk.DEPTH; z++) {
+                for (int x = 0; x < Chunk.WIDTH; x++) {
+                    int blockId = chunk.getBlock(x, y, z);
+                    
+                    // Skip air blocks
+                    if (blockId == 0) {
+                        continue;
+                    }
+                    
+                    Block block = blockRegistry.getBlock(blockId);
+                    if (block == null || block.isAir()) {
+                        continue;
+                    }
+                    
+                    // Calculate world position for this block
+                    float worldX = chunk.getWorldX(x);
+                    float worldZ = chunk.getWorldZ(z);
+                    
+                    // Check each face for visibility
+                    addVisibleFaces(chunk, x, y, z, worldX, y, worldZ, block);
+                }
+            }
+        }
+        
+        // Return null if no faces were generated
+        if (posIndex == 0) {
+            if (pooledMesh != null) {
+                MeshPool.getInstance().release(pooledMesh);
+            }
+            return null;
+        }
+        
+        // Acquire a pooled mesh if needed
+        if (pooledMesh == null) {
+            pooledMesh = MeshPool.getInstance().acquire();
+        }
+        
+        // Create trimmed arrays for the mesh data
+        float[] finalPositions = new float[posIndex];
+        float[] finalTexCoords = new float[texIndex];
+        float[] finalNormals = new float[normIndex];
+        float[] finalTints = new float[tintIndex];
+        int[] finalIndices = new int[indIndex];
+        
+        System.arraycopy(positions, 0, finalPositions, 0, posIndex);
+        System.arraycopy(texCoords, 0, finalTexCoords, 0, texIndex);
+        System.arraycopy(normals, 0, finalNormals, 0, normIndex);
+        System.arraycopy(tints, 0, finalTints, 0, tintIndex);
+        System.arraycopy(indices, 0, finalIndices, 0, indIndex);
+        
+        // Update the pooled mesh with new data
+        pooledMesh.updateData(finalPositions, finalTexCoords, finalNormals, finalTints, finalIndices);
+        
+        return pooledMesh;
     }
     
     /**

@@ -1,6 +1,8 @@
 package me.alextzamalis.voxel;
 
 import me.alextzamalis.graphics.Mesh;
+import me.alextzamalis.graphics.MeshPool;
+import me.alextzamalis.graphics.PooledMesh;
 
 /**
  * Represents a chunk of blocks in the voxel world.
@@ -40,8 +42,11 @@ public class Chunk {
     /** Block data stored as numeric IDs. */
     private final short[] blocks;
     
-    /** The rendered mesh for this chunk. */
+    /** The rendered mesh for this chunk (traditional, non-pooled). */
     private Mesh mesh;
+    
+    /** The pooled mesh for this chunk (memory-efficient). */
+    private PooledMesh pooledMesh;
     
     /** Whether the chunk data has changed and needs mesh rebuild. */
     private boolean dirty;
@@ -225,6 +230,38 @@ public class Chunk {
     }
     
     /**
+     * Gets the pooled mesh for this chunk.
+     * 
+     * @return The pooled mesh, or null if not set
+     */
+    public PooledMesh getPooledMesh() {
+        return pooledMesh;
+    }
+    
+    /**
+     * Sets the pooled mesh for this chunk.
+     * 
+     * @param pooledMesh The pooled mesh to use
+     */
+    public void setPooledMesh(PooledMesh pooledMesh) {
+        // Release old pooled mesh back to pool
+        if (this.pooledMesh != null) {
+            MeshPool.getInstance().release(this.pooledMesh);
+        }
+        this.pooledMesh = pooledMesh;
+        this.dirty = false;
+    }
+    
+    /**
+     * Checks if the chunk has a pooled mesh.
+     * 
+     * @return true if has pooled mesh with data
+     */
+    public boolean hasPooledMesh() {
+        return pooledMesh != null && pooledMesh.hasData();
+    }
+    
+    /**
      * Checks if the chunk is dirty (needs mesh rebuild).
      * 
      * @return true if dirty
@@ -290,6 +327,10 @@ public class Chunk {
         if (mesh != null) {
             mesh.cleanup();
             mesh = null;
+        }
+        if (pooledMesh != null) {
+            MeshPool.getInstance().release(pooledMesh);
+            pooledMesh = null;
         }
     }
     

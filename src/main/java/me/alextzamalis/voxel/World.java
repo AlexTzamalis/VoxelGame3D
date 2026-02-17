@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import me.alextzamalis.graphics.Mesh;
+import me.alextzamalis.graphics.PooledMesh;
 import me.alextzamalis.graphics.TextureAtlas;
 import me.alextzamalis.util.Logger;
 import me.alextzamalis.world.WorldGenerator;
@@ -241,13 +242,23 @@ public class World {
     }
     
     /**
-     * Builds the mesh for a chunk.
+     * Builds the mesh for a chunk using traditional Mesh.
      * 
      * @param chunk The chunk
      */
     public void buildChunkMesh(Chunk chunk) {
         Mesh mesh = meshBuilder.buildMesh(chunk);
         chunk.setMesh(mesh);
+    }
+    
+    /**
+     * Builds the mesh for a chunk using a pooled mesh for efficiency.
+     * 
+     * @param chunk The chunk
+     */
+    public void buildChunkMeshPooled(Chunk chunk) {
+        PooledMesh pooledMesh = meshBuilder.buildPooledMesh(chunk, chunk.getPooledMesh());
+        chunk.setPooledMesh(pooledMesh);
     }
     
     /**
