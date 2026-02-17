@@ -151,28 +151,37 @@ public class SettingsScreen implements Screen {
     
     @Override
     public void render(GuiRenderer guiRenderer) {
-        if (guiRenderer == null || screenWidth <= 0 || screenHeight <= 0) {
-            return; // Safety check
-        }
-        
-        // Draw dark background
-        guiRenderer.drawRect(0, 0, screenWidth, screenHeight, 0.1f, 0.1f, 0.15f, 1.0f);
-        
-        // Draw title
-        guiRenderer.setFontScale(3.0f);
-        guiRenderer.drawTextCentered("SETTINGS", screenWidth / 2f, 80, 1.0f, 1.0f, 1.0f);
-        
-        // Draw buttons (they render their own text)
-        guiRenderer.setFontScale(2.0f);
-        for (Button button : buttons) {
-            if (button != null) {
-                button.render(guiRenderer);
+        try {
+            if (guiRenderer == null || screenWidth <= 0 || screenHeight <= 0) {
+                Logger.warn("SettingsScreen: Cannot render - invalid state (guiRenderer=%s, size=%dx%d)", 
+                           guiRenderer != null ? "ok" : "null", screenWidth, screenHeight);
+                return; // Safety check
             }
+            
+            // Draw dark background
+            guiRenderer.drawRect(0, 0, screenWidth, screenHeight, 0.1f, 0.1f, 0.15f, 1.0f);
+            
+            // Draw title
+            guiRenderer.setFontScale(3.0f);
+            guiRenderer.drawTextCentered("SETTINGS", screenWidth / 2f, 80, 1.0f, 1.0f, 1.0f);
+            
+            // Draw buttons (they render their own text)
+            guiRenderer.setFontScale(2.0f);
+            if (buttons != null) {
+                for (Button button : buttons) {
+                    if (button != null) {
+                        button.render(guiRenderer);
+                    }
+                }
+            }
+            
+            // Draw "coming soon" notice
+            guiRenderer.setFontScale(1.5f);
+            guiRenderer.drawTextCentered("MORE OPTIONS COMING SOON", screenWidth / 2f, screenHeight - 50, 0.5f, 0.5f, 0.5f);
+        } catch (Exception e) {
+            Logger.error("SettingsScreen render error: %s", e.getMessage());
+            e.printStackTrace();
         }
-        
-        // Draw "coming soon" notice
-        guiRenderer.setFontScale(1.5f);
-        guiRenderer.drawTextCentered("MORE OPTIONS COMING SOON", screenWidth / 2f, screenHeight - 50, 0.5f, 0.5f, 0.5f);
     }
     
     @Override
