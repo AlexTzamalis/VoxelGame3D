@@ -40,14 +40,14 @@ public class AsyncChunkManager {
     /** Number of worker threads for chunk generation. Uses all available cores for maximum performance. */
     private static final int WORKER_THREADS = Math.max(4, Runtime.getRuntime().availableProcessors());
     
-    /** Maximum chunks to generate per frame. Increased for better utilization. */
-    private static final int MAX_GENERATIONS_PER_FRAME = 8;
+    /** Maximum chunks to generate per frame. Reduced to prevent mesh pool exhaustion. */
+    private static final int MAX_GENERATIONS_PER_FRAME = 2;
     
-    /** Maximum chunks to mesh per frame. Increased for better utilization. */
-    private static final int MAX_MESHES_PER_FRAME = 4;
+    /** Maximum chunks to mesh per frame. Reduced to prevent mesh pool exhaustion. */
+    private static final int MAX_MESHES_PER_FRAME = 1;
     
-    /** Maximum pending generation tasks. */
-    private static final int MAX_PENDING_TASKS = 128;
+    /** Maximum pending generation tasks. Reduced to prevent mesh pool exhaustion. */
+    private static final int MAX_PENDING_TASKS = 32;
     
     /** The world being managed. */
     private final World world;
@@ -319,10 +319,18 @@ public class AsyncChunkManager {
         while (!chunksToMesh.isEmpty() && built < MAX_MESHES_PER_FRAME) {
             Chunk chunk = chunksToMesh.poll();
             if (chunk != null && chunk.isGenerated()) {
-                // Build mesh using pooled mesh system
-                world.buildChunkMeshPooled(chunk);
-                chunksMeshed.incrementAndGet();
-                built++;
+                try {
+                    // Build mesh using pooled mesh system
+                    world.buildChunkMeshPooled(chunk);
+                    chunksMeshed.incrementAndGet();
+                    built++;
+                } catch (Exception e) {
+                    // If mesh building fails (e.g., pool exhausted), re-queue the chunk
+                    Logger.warn("Failed to build mesh for chunk (%d, %d): %s. Will retry later.", 
+                               chunk.getChunkX(), chunk.getChunkZ(), e.getMessage());
+                    chunksToMesh.offer(chunk); // Re-queue for later
+                    break; // Stop trying this frame
+                }
             }
         }
     }

@@ -261,7 +261,11 @@ public class World {
      */
     public void buildChunkMeshPooled(Chunk chunk) {
         PooledMesh pooledMesh = meshBuilder.buildPooledMesh(chunk, chunk.getPooledMesh());
-        chunk.setPooledMesh(pooledMesh);
+        if (pooledMesh != null) {
+            chunk.setPooledMesh(pooledMesh);
+        }
+        // If pooledMesh is null, mesh building failed (e.g., pool exhausted)
+        // The chunk will remain dirty and can be retried later
     }
     
     /**
