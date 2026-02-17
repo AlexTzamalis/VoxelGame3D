@@ -71,6 +71,22 @@ gradlew.bat run
 gradlew.bat javadoc
 ```
 
+## World Storage
+
+Worlds are saved in a `worlds/` directory relative to where the game is run from (the working directory). This directory is automatically created when you first create or load a world. The worlds are stored outside the project structure to keep them separate from the source code.
+
+**Location**: `worlds/` (in the same directory as where you run the game)
+
+Each world is stored in its own subdirectory with the following structure:
+```
+worlds/
+└── WorldName/
+    ├── world.dat      # World metadata (name, seed, game mode)
+    ├── player.dat     # Player data (position, rotation, game mode)
+    └── region/        # Chunk data files
+        └── c.X.Z.dat  # Individual chunk files
+```
+
 ## Development
 
 This project follows a modular game engine architecture with the following key principles:

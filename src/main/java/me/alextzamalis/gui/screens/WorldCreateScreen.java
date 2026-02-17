@@ -44,6 +44,9 @@ public class WorldCreateScreen implements Screen {
     /** Menu buttons. */
     private final List<Button> buttons;
     
+    /** Flag to rebuild buttons next frame (avoids concurrent modification). */
+    private boolean needsButtonRebuild = false;
+    
     /** Current world name. */
     private String worldName = "New World";
     
@@ -114,7 +117,7 @@ public class WorldCreateScreen implements Screen {
             gameMode = (gameMode == WorldMetadata.GAME_MODE_CREATIVE) 
                       ? WorldMetadata.GAME_MODE_SURVIVAL 
                       : WorldMetadata.GAME_MODE_CREATIVE;
-            createButtons(); // Refresh button text
+            needsButtonRebuild = true; // Schedule rebuild for next frame
         });
         buttons.add(gameModeBtn);
         
@@ -130,7 +133,7 @@ public class WorldCreateScreen implements Screen {
                 // Generate a seed to show
                 worldSeed = random.nextLong() & 0xFFFFFFFFL; // Positive seed
             }
-            createButtons(); // Refresh button text
+            needsButtonRebuild = true; // Schedule rebuild for next frame
         });
         buttons.add(randomSeedBtn);
         
@@ -208,6 +211,13 @@ public class WorldCreateScreen implements Screen {
      * Updates with input manager.
      */
     public void update(float deltaTime, InputManager inputManager) {
+        // Rebuild buttons if needed (deferred to avoid concurrent modification)
+        if (needsButtonRebuild) {
+            needsButtonRebuild = false;
+            createButtons();
+            return; // Skip update this frame to avoid issues
+        }
+        
         for (Button button : buttons) {
             button.update(inputManager);
         }

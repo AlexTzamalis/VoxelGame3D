@@ -1,7 +1,10 @@
 package me.alextzamalis.core;
 
+import me.alextzamalis.config.GameSettings;
+import me.alextzamalis.config.SettingsManager;
 import me.alextzamalis.graphics.Renderer;
 import me.alextzamalis.input.InputManager;
+import me.alextzamalis.util.Logger;
 
 /**
  * The main game engine class that manages the game lifecycle.
@@ -10,6 +13,9 @@ import me.alextzamalis.input.InputManager;
  * running the main game loop, and cleaning up resources on shutdown.
  * It follows a modular architecture where each subsystem (window, input,
  * graphics, etc.) is managed independently.
+ * 
+ * <p>Supports separate update and render threads (like Sodium/Fabric) for
+ * better performance, where game logic runs on a separate thread from rendering.
  * 
  * <p>Usage example:
  * <pre>{@code
@@ -22,11 +28,11 @@ import me.alextzamalis.input.InputManager;
  */
 public class GameEngine implements Runnable {
     
-    /** The target frames per second for the game loop. */
-    public static final int TARGET_FPS = 60;
+    /** Default target FPS (used if settings not loaded). */
+    private static final int DEFAULT_TARGET_FPS = 60;
     
-    /** The target updates per second for the game logic. */
-    public static final int TARGET_UPS = 60;
+    /** Default target UPS (used if settings not loaded). */
+    private static final int DEFAULT_TARGET_UPS = 20;
     
     /** The window instance for rendering. */
     private final Window window;
@@ -45,6 +51,21 @@ public class GameEngine implements Runnable {
     
     /** Flag indicating if the engine is running. */
     private volatile boolean running;
+    
+    /** Settings manager for configurable FPS/UPS and other settings. */
+    private final SettingsManager settingsManager;
+    
+    /** Update thread (runs game logic separately from rendering). */
+    private Thread updateThread;
+    
+    /** Synchronization object for update thread. */
+    private final Object updateLock = new Object();
+    
+    /** Flag for update thread to run. */
+    private volatile boolean updateThreadRunning;
+    
+    /** Accumulator for fixed timestep updates. */
+    private float updateAccumulator = 0f;
     
     /**
      * Creates a new game engine instance with the specified window parameters.
@@ -68,12 +89,19 @@ public class GameEngine implements Runnable {
             throw new IllegalArgumentException("Width and height must be at least 1");
         }
         
-        this.window = new Window(title, width, height, vSync);
+        this.settingsManager = SettingsManager.getInstance();
+        GameSettings settings = settingsManager.getSettings();
+        
+        // Use VSync from settings if available, otherwise use parameter
+        boolean useVSync = settings != null ? settings.isVSync() : vSync;
+        
+        this.window = new Window(title, width, height, useVSync);
         this.timer = new Timer();
         this.inputManager = new InputManager();
         this.renderer = new Renderer();
         this.gameLogic = gameLogic;
         this.running = false;
+        this.updateThreadRunning = false;
     }
     
     /**
@@ -143,31 +171,113 @@ public class GameEngine implements Runnable {
      * <p>This loop separates update logic (fixed timestep) from rendering
      * (variable timestep) to ensure consistent physics and game logic
      * regardless of frame rate.
+     * 
+     * <p>Supports separate update thread (like Sodium/Fabric) where game logic
+     * runs on a dedicated thread, allowing rendering to run at higher FPS
+     * while updates run at a lower, fixed rate.
      */
     private void gameLoop() {
-        float elapsedTime;
-        float accumulator = 0f;
-        float interval = 1f / TARGET_UPS;
+        GameSettings settings = settingsManager.getSettings();
+        int targetFPS = settings != null ? settings.getTargetFPS() : DEFAULT_TARGET_FPS;
+        int targetUPS = settings != null ? settings.getTargetUPS() : DEFAULT_TARGET_UPS;
+        boolean separateThread = settings != null && settings.isSeparateUpdateThread();
         
+        float updateInterval = 1f / targetUPS;
+        
+        // Start update thread if enabled
+        if (separateThread) {
+            startUpdateThread(targetUPS, updateInterval);
+        }
+        
+        // Main render loop (runs on main thread)
         while (running && !window.windowShouldClose()) {
-            elapsedTime = timer.getElapsedTime();
-            accumulator += elapsedTime;
+            float elapsedTime = timer.getElapsedTime();
             
-            // Process input
+            // Process input (always on main thread)
             input();
             
-            // Fixed timestep updates
-            while (accumulator >= interval) {
-                update(interval);
-                accumulator -= interval;
+            // Update logic (on separate thread if enabled, otherwise here)
+            if (!separateThread) {
+                updateAccumulator += elapsedTime;
+                while (updateAccumulator >= updateInterval) {
+                    update(updateInterval);
+                    updateAccumulator -= updateInterval;
+                }
             }
             
-            // Render
+            // Render (always on main thread - OpenGL requirement)
             render();
             
             // Sync if not using VSync
             if (!window.isVSync()) {
-                sync();
+                sync(targetFPS);
+            }
+        }
+        
+        // Stop update thread
+        if (separateThread) {
+            stopUpdateThread();
+        }
+    }
+    
+    /**
+     * Starts the update thread for separate update/render threading.
+     * 
+     * @param targetUPS Target updates per second
+     * @param updateInterval Update interval in seconds
+     */
+    private void startUpdateThread(int targetUPS, float updateInterval) {
+        updateThreadRunning = true;
+        updateThread = new Thread(() -> {
+            Logger.info("Update thread started (target UPS: %d)", targetUPS);
+            
+            long lastTime = System.nanoTime();
+            double nsPerUpdate = 1_000_000_000.0 / targetUPS;
+            
+            while (updateThreadRunning && running) {
+                long now = System.nanoTime();
+                long elapsed = now - lastTime;
+                lastTime = now;
+                
+                double deltaTime = elapsed / nsPerUpdate;
+                
+                // Cap delta time to prevent large jumps
+                if (deltaTime > 1.0) {
+                    deltaTime = 1.0;
+                }
+                
+                synchronized (updateLock) {
+                    update((float) (deltaTime * updateInterval));
+                }
+                
+                // Sleep to maintain target UPS
+                long sleepTime = (long) ((nsPerUpdate - elapsed) / 1_000_000);
+                if (sleepTime > 0) {
+                    try {
+                        Thread.sleep(sleepTime);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+            
+            Logger.info("Update thread stopped");
+        }, "GameUpdateThread");
+        updateThread.setDaemon(true);
+        updateThread.start();
+    }
+    
+    /**
+     * Stops the update thread.
+     */
+    private void stopUpdateThread() {
+        updateThreadRunning = false;
+        if (updateThread != null) {
+            try {
+                updateThread.join(1000); // Wait up to 1 second
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
         }
     }
@@ -177,9 +287,11 @@ public class GameEngine implements Runnable {
      * 
      * <p>This method sleeps the thread to maintain a consistent
      * frame rate when VSync is disabled.
+     * 
+     * @param targetFPS Target frames per second
      */
-    private void sync() {
-        float loopSlot = 1f / TARGET_FPS;
+    private void sync(int targetFPS) {
+        float loopSlot = 1f / targetFPS;
         double endTime = timer.getLastLoopTime() + loopSlot;
         while (timer.getTime() < endTime) {
             try {
@@ -201,9 +313,19 @@ public class GameEngine implements Runnable {
     /**
      * Updates game logic with a fixed timestep.
      * 
+     * <p>This method is thread-safe and can be called from either
+     * the main thread or the update thread.
+     * 
      * @param deltaTime The time step in seconds
      */
     private void update(float deltaTime) {
+        // Cap delta time to prevent large jumps (like Sodium does)
+        GameSettings settings = settingsManager.getSettings();
+        float maxDelta = settings != null ? settings.getMaxFrameTime() : 0.1f;
+        if (deltaTime > maxDelta) {
+            deltaTime = maxDelta;
+        }
+        
         gameLogic.update(deltaTime, inputManager);
     }
     
@@ -279,6 +401,25 @@ public class GameEngine implements Runnable {
      */
     public Renderer getRenderer() {
         return renderer;
+    }
+    
+    /**
+     * Gets the settings manager.
+     * 
+     * @return The settings manager
+     */
+    public SettingsManager getSettingsManager() {
+        return settingsManager;
+    }
+    
+    /**
+     * Applies VSync setting from config (call after settings change).
+     */
+    public void applyVSyncSetting() {
+        GameSettings settings = settingsManager.getSettings();
+        if (settings != null) {
+            window.setVSync(settings.isVSync());
+        }
     }
 }
 

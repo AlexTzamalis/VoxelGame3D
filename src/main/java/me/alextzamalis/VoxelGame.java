@@ -52,14 +52,27 @@ import static org.lwjgl.glfw.GLFW.*;
  */
 public class VoxelGame implements IGameLogic {
     
-    /** View distance in chunks. */
-    private static final int VIEW_DISTANCE = 4;
+    /** Default view distance in chunks (used if settings not loaded). */
+    private static final int DEFAULT_VIEW_DISTANCE = 3;
     
     /** Unload distance multiplier (chunks beyond VIEW_DISTANCE * this are unloaded). */
     private static final float UNLOAD_DISTANCE_MULTIPLIER = 1.5f;
     
-    /** Maximum chunks to generate/rebuild per frame (prevents frame drops). */
-    private static final int MAX_CHUNKS_PER_FRAME = 2;
+    /** Settings manager for configurable settings. */
+    private me.alextzamalis.config.SettingsManager settingsManager;
+    
+    /** Default max chunks per frame (used if settings not loaded). */
+    private static final int DEFAULT_MAX_CHUNKS_PER_FRAME = 1;
+    
+    /** Default max meshes per frame (used if settings not loaded). */
+    private static final int DEFAULT_MAX_MESHES_PER_FRAME = 1;
+    
+    /** Spiral index for chunk loading (tracks where we left off). */
+    private int chunkLoadSpiralIndex = 0;
+    
+    /** Last player chunk position (for detecting movement). */
+    private int lastPlayerChunkX = Integer.MIN_VALUE;
+    private int lastPlayerChunkZ = Integer.MIN_VALUE;
     
     /** Block texture tile size in pixels. */
     private static final int TEXTURE_TILE_SIZE = 16;
@@ -163,6 +176,9 @@ public class VoxelGame implements IGameLogic {
         Logger.info("Initializing Voxel Game...");
         this.windowRef = window;
         
+        // Initialize settings manager
+        settingsManager = me.alextzamalis.config.SettingsManager.getInstance();
+        
         // Initialize renderer
         renderer = new Renderer();
         renderer.init();
@@ -237,17 +253,17 @@ public class VoxelGame implements IGameLogic {
         screenManager.registerScreen(GameState.SETTINGS, settingsScreen);
         
         // Listen for state changes
+        // NOTE: This callback may be called from update thread, so we can't call OpenGL here
+        // Instead, we'll handle OpenGL operations in the render method
         screenManager.setStateChangeListener((oldState, newState) -> {
+            // Only handle non-OpenGL operations here (like cursor)
+            // OpenGL operations (setClearColor) will be handled in render() on main thread
             if (newState == GameState.PLAYING) {
-                // Lock cursor when playing
+                // Lock cursor when playing (GLFW is thread-safe for this)
                 glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-                renderer.setClearColor(0.5f, 0.7f, 1.0f, 1.0f); // Sky blue
             } else {
                 // Show cursor in menus
                 glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-                if (newState != GameState.LOADING) {
-                    renderer.setClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Dark menu
-                }
             }
         });
         
@@ -265,7 +281,8 @@ public class VoxelGame implements IGameLogic {
         loadingScreen.setStatusMessage("Preparing world...");
         
         // Calculate total chunks to load
-        int diameter = VIEW_DISTANCE * 2 + 1;
+        int viewDist = getViewDistance();
+        int diameter = viewDist * 2 + 1;
         loadingChunksTotal = diameter * diameter;
         loadingChunksCompleted = 0;
         
@@ -546,19 +563,20 @@ public class VoxelGame implements IGameLogic {
                 loadingScreen.setStatusMessage("Generating terrain...");
             } catch (Exception e) {
                 Logger.error("Failed to initialize world: %s", e.getMessage());
+                e.printStackTrace();
                 screenManager.setState(GameState.MAIN_MENU);
                 return;
             }
         }
         
-        // Generate chunks incrementally
+        // Generate chunks incrementally - ONLY 1-2 per frame to stay responsive!
         if (world != null && loadingChunksCompleted < loadingChunksTotal) {
             Vector3f playerPos = playerController.getPosition();
             int playerChunkX = Chunk.worldToChunkX((int) playerPos.x);
             int playerChunkZ = Chunk.worldToChunkZ((int) playerPos.z);
             
-            // Process more chunks during loading (faster loading)
-            int chunksThisFrame = Math.min(8, loadingChunksTotal - loadingChunksCompleted);
+            // Process only 1-2 chunks per frame to keep UI responsive
+            int chunksThisFrame = Math.min(2, loadingChunksTotal - loadingChunksCompleted);
             
             for (int i = 0; i < chunksThisFrame; i++) {
                 // Calculate chunk position in spiral
@@ -652,39 +670,126 @@ public class VoxelGame implements IGameLogic {
         loadChunksAroundPlayer(playerChunkX, playerChunkZ);
         
         // Unload distant chunks
-        int unloadDistance = (int) (VIEW_DISTANCE * UNLOAD_DISTANCE_MULTIPLIER);
+        int viewDist = getViewDistance();
+        int unloadDistance = (int) (viewDist * UNLOAD_DISTANCE_MULTIPLIER);
         world.unloadDistantChunks(playerChunkX, playerChunkZ, unloadDistance);
     }
     
     /**
      * Loads chunks around the player with rate limiting.
+     * Uses spiral pattern to load chunks incrementally without expensive nested loops.
+     * Prioritizes dirty chunks (from block breaking/placing) over new chunk generation.
      */
     private void loadChunksAroundPlayer(int centerChunkX, int centerChunkZ) {
-        for (int radius = 0; radius <= VIEW_DISTANCE && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; radius++) {
-            for (int dx = -radius; dx <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dx++) {
-                for (int dz = -radius; dz <= radius && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME; dz++) {
-                    if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) {
-                        continue;
-                    }
-                    
-                    int chunkX = centerChunkX + dx;
-                    int chunkZ = centerChunkZ + dz;
-                    
-                    Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
-                    
-                    if (!chunk.isGenerated()) {
-                        world.getGenerator().generateChunk(chunk, world);
-                        chunk.setGenerated(true);
-                        chunksProcessedThisFrame++;
-                    }
-                    
-                    if (chunk.isDirty() && chunksProcessedThisFrame < MAX_CHUNKS_PER_FRAME) {
-                        world.buildChunkMesh(chunk);
-                        chunksProcessedThisFrame++;
-                    }
+        // Reset spiral if player moved to a new chunk
+        if (centerChunkX != lastPlayerChunkX || centerChunkZ != lastPlayerChunkZ) {
+            chunkLoadSpiralIndex = 0;
+            lastPlayerChunkX = centerChunkX;
+            lastPlayerChunkZ = centerChunkZ;
+        }
+        
+        int viewDist = getViewDistance();
+        int maxChunksPerFrame = getMaxChunksPerFrame();
+        int maxMeshesPerFrame = getMaxMeshesPerFrame();
+        
+        int chunksGenerated = 0;
+        int chunksMeshed = 0;
+        int maxChunks = (viewDist * 2 + 1) * (viewDist * 2 + 1);
+        
+        // FIRST: Process dirty chunks (from block breaking/placing) - highest priority
+        // This prevents freezes when breaking/placing blocks
+        // Limit how many chunks we check to avoid iterating over large collections
+        if (chunksMeshed < maxMeshesPerFrame) {
+            int chunksChecked = 0;
+            int maxChecks = 20; // Don't check more than 20 chunks per frame
+            
+            for (Chunk chunk : world.getChunks()) {
+                if (chunksMeshed >= maxMeshesPerFrame || chunksChecked >= maxChecks) break;
+                chunksChecked++;
+                
+                // Only process chunks within view distance
+                int dx = chunk.getChunkX() - centerChunkX;
+                int dz = chunk.getChunkZ() - centerChunkZ;
+                if (Math.abs(dx) > viewDist || Math.abs(dz) > viewDist) {
+                    continue;
+                }
+                
+                // Process dirty chunks first (user interactions)
+                if (chunk.isGenerated() && chunk.isDirty()) {
+                    world.buildChunkMesh(chunk);
+                    chunksMeshed++;
+                    break; // Only process one dirty chunk per frame to stay responsive
                 }
             }
         }
+        
+        // SECOND: Process new chunks in spiral pattern (only if we have capacity)
+        while (chunkLoadSpiralIndex < maxChunks && 
+               chunksGenerated < maxChunksPerFrame) {
+            
+            int[] offset = getSpiralOffset(chunkLoadSpiralIndex);
+            int chunkX = centerChunkX + offset[0];
+            int chunkZ = centerChunkZ + offset[1];
+            
+            // Check if within view distance
+            if (Math.abs(offset[0]) > viewDist || Math.abs(offset[1]) > viewDist) {
+                chunkLoadSpiralIndex++;
+                continue;
+            }
+            
+            // Generate chunk if needed (skip if already generated)
+            Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
+            if (!chunk.isGenerated()) {
+                world.getGenerator().generateChunk(chunk, world);
+                chunk.setGenerated(true);
+                chunksGenerated++;
+            }
+            
+            chunkLoadSpiralIndex++;
+        }
+        
+        // Reset spiral index if we've completed a full cycle
+        if (chunkLoadSpiralIndex >= maxChunks) {
+            chunkLoadSpiralIndex = 0; // Start over, checking for new chunks
+        }
+        
+        chunksProcessedThisFrame = chunksGenerated + chunksMeshed;
+    }
+    
+    /**
+     * Gets the current view distance from settings.
+     * 
+     * @return View distance in chunks
+     */
+    private int getViewDistance() {
+        if (settingsManager != null && settingsManager.getSettings() != null) {
+            return settingsManager.getSettings().getViewDistance();
+        }
+        return DEFAULT_VIEW_DISTANCE;
+    }
+    
+    /**
+     * Gets the maximum chunks to generate per frame from settings.
+     * 
+     * @return Max chunks per frame
+     */
+    private int getMaxChunksPerFrame() {
+        if (settingsManager != null && settingsManager.getSettings() != null) {
+            return settingsManager.getSettings().getMaxChunksPerFrame();
+        }
+        return DEFAULT_MAX_CHUNKS_PER_FRAME;
+    }
+    
+    /**
+     * Gets the maximum meshes to build per frame from settings.
+     * 
+     * @return Max meshes per frame
+     */
+    private int getMaxMeshesPerFrame() {
+        if (settingsManager != null && settingsManager.getSettings() != null) {
+            return settingsManager.getSettings().getMaxMeshesPerFrame();
+        }
+        return DEFAULT_MAX_MESHES_PER_FRAME;
     }
     
     @Override
@@ -692,6 +797,14 @@ public class VoxelGame implements IGameLogic {
         renderer.prepare(window);
         
         GameState currentState = screenManager.getCurrentState();
+        
+        // Handle clear color based on game state (must be on main thread for OpenGL)
+        // This ensures OpenGL calls happen on the correct thread
+        if (currentState == GameState.PLAYING) {
+            renderer.setClearColor(0.5f, 0.7f, 1.0f, 1.0f); // Sky blue for in-game
+        } else if (currentState != GameState.LOADING) {
+            renderer.setClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Dark menu background
+        }
         
         if (currentState == GameState.PLAYING && world != null && playerController != null) {
             renderWorld(window);
