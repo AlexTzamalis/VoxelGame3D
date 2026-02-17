@@ -64,6 +64,13 @@ public class VoxelGame implements IGameLogic {
     /** Maximum chunk meshes to build per frame. */
     private static final int MAX_MESHES_PER_FRAME = 1;
     
+    /** Spiral index for chunk loading (tracks where we left off). */
+    private int chunkLoadSpiralIndex = 0;
+    
+    /** Last player chunk position (for detecting movement). */
+    private int lastPlayerChunkX = Integer.MIN_VALUE;
+    private int lastPlayerChunkZ = Integer.MIN_VALUE;
+    
     /** Block texture tile size in pixels. */
     private static final int TEXTURE_TILE_SIZE = 16;
     
@@ -662,53 +669,59 @@ public class VoxelGame implements IGameLogic {
     
     /**
      * Loads chunks around the player with rate limiting.
-     * Separates generation from meshing to distribute work across frames.
+     * Uses spiral pattern to load chunks incrementally without expensive nested loops.
      */
     private void loadChunksAroundPlayer(int centerChunkX, int centerChunkZ) {
-        int chunksGenerated = 0;
-        int chunksMeshed = 0;
-        
-        // First pass: generate terrain (expensive)
-        for (int radius = 0; radius <= VIEW_DISTANCE && chunksGenerated < MAX_CHUNKS_PER_FRAME; radius++) {
-            for (int dx = -radius; dx <= radius && chunksGenerated < MAX_CHUNKS_PER_FRAME; dx++) {
-                for (int dz = -radius; dz <= radius && chunksGenerated < MAX_CHUNKS_PER_FRAME; dz++) {
-                    if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) {
-                        continue;
-                    }
-                    
-                    int chunkX = centerChunkX + dx;
-                    int chunkZ = centerChunkZ + dz;
-                    
-                    Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
-                    
-                    if (!chunk.isGenerated()) {
-                        world.getGenerator().generateChunk(chunk, world);
-                        chunk.setGenerated(true);
-                        chunksGenerated++;
-                    }
-                }
-            }
+        // Reset spiral if player moved to a new chunk
+        if (centerChunkX != lastPlayerChunkX || centerChunkZ != lastPlayerChunkZ) {
+            chunkLoadSpiralIndex = 0;
+            lastPlayerChunkX = centerChunkX;
+            lastPlayerChunkZ = centerChunkZ;
         }
         
-        // Second pass: build meshes (also expensive but separate from generation)
-        for (int radius = 0; radius <= VIEW_DISTANCE && chunksMeshed < MAX_MESHES_PER_FRAME; radius++) {
-            for (int dx = -radius; dx <= radius && chunksMeshed < MAX_MESHES_PER_FRAME; dx++) {
-                for (int dz = -radius; dz <= radius && chunksMeshed < MAX_MESHES_PER_FRAME; dz++) {
-                    if (radius > 0 && Math.abs(dx) != radius && Math.abs(dz) != radius) {
-                        continue;
-                    }
-                    
-                    int chunkX = centerChunkX + dx;
-                    int chunkZ = centerChunkZ + dz;
-                    
-                    Chunk chunk = world.getChunk(chunkX, chunkZ);
-                    
-                    if (chunk != null && chunk.isGenerated() && chunk.isDirty()) {
-                        world.buildChunkMesh(chunk);
-                        chunksMeshed++;
-                    }
+        int chunksGenerated = 0;
+        int chunksMeshed = 0;
+        int maxChunks = (VIEW_DISTANCE * 2 + 1) * (VIEW_DISTANCE * 2 + 1);
+        
+        // Process chunks in spiral pattern (much faster than nested loops)
+        while (chunkLoadSpiralIndex < maxChunks && 
+               (chunksGenerated < MAX_CHUNKS_PER_FRAME || chunksMeshed < MAX_MESHES_PER_FRAME)) {
+            
+            int[] offset = getSpiralOffset(chunkLoadSpiralIndex);
+            int chunkX = centerChunkX + offset[0];
+            int chunkZ = centerChunkZ + offset[1];
+            
+            // Check if within view distance
+            if (Math.abs(offset[0]) > VIEW_DISTANCE || Math.abs(offset[1]) > VIEW_DISTANCE) {
+                chunkLoadSpiralIndex++;
+                continue;
+            }
+            
+            // Try to generate chunk if needed
+            if (chunksGenerated < MAX_CHUNKS_PER_FRAME) {
+                Chunk chunk = world.getOrCreateChunk(chunkX, chunkZ);
+                if (!chunk.isGenerated()) {
+                    world.getGenerator().generateChunk(chunk, world);
+                    chunk.setGenerated(true);
+                    chunksGenerated++;
                 }
             }
+            
+            // Try to mesh chunk if needed
+            if (chunksMeshed < MAX_MESHES_PER_FRAME) {
+                Chunk chunk = world.getChunk(chunkX, chunkZ);
+                if (chunk != null && chunk.isGenerated() && chunk.isDirty()) {
+                    world.buildChunkMesh(chunk);
+                    chunksMeshed++;
+                }
+            }
+            
+            chunkLoadSpiralIndex++;
+        }
+        
+        // Reset spiral index if we've completed a full cycle
+        if (chunkLoadSpiralIndex >= maxChunks) {
+            chunkLoadSpiralIndex = 0; // Start over, checking for new/dirty chunks
         }
         
         chunksProcessedThisFrame = chunksGenerated + chunksMeshed;
