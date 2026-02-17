@@ -412,6 +412,10 @@ public class World {
     public boolean unloadChunk(long key) {
         Chunk chunk = chunks.remove(key);
         if (chunk != null) {
+            // Deallocate from global buffer if using MDI rendering
+            if (meshBuilder != null && meshBuilder.getGlobalBufferManager() != null) {
+                meshBuilder.getGlobalBufferManager().deallocateChunk(key);
+            }
             chunk.cleanup();
             return true;
         }

@@ -282,6 +282,10 @@ public class ChunkMeshBuilder {
             return false;
         }
         
+        // Check if chunk already has an allocation (for updates)
+        me.alextzamalis.graphics.GlobalBufferManager.ChunkAllocation existingAlloc = 
+            globalBufferManager.getAllocations().get(chunkKey);
+        
         // Reset indices
         posIndex = 0;
         texIndex = 0;
@@ -325,13 +329,24 @@ public class ChunkMeshBuilder {
         int vertexCount = posIndex / 3;
         int indexCount = indIndex;
         
-        // Allocate space in global buffer
-        me.alextzamalis.graphics.GlobalBufferManager.ChunkAllocation alloc = 
-            globalBufferManager.allocateChunk(chunkKey, vertexCount, indexCount);
+        // Allocate or reuse space in global buffer
+        me.alextzamalis.graphics.GlobalBufferManager.ChunkAllocation alloc = existingAlloc;
         
-        if (alloc == null) {
-            me.alextzamalis.util.Logger.warn("Failed to allocate buffer space for chunk %d", chunkKey);
-            return false;
+        // If no existing allocation or size changed, allocate new space
+        if (alloc == null || !alloc.valid || 
+            alloc.vertexCount != vertexCount || alloc.indexCount != indexCount) {
+            // Deallocate old allocation if it exists
+            if (existingAlloc != null && existingAlloc.valid) {
+                globalBufferManager.deallocateChunk(chunkKey);
+            }
+            
+            // Allocate new space
+            alloc = globalBufferManager.allocateChunk(chunkKey, vertexCount, indexCount);
+            
+            if (alloc == null) {
+                me.alextzamalis.util.Logger.warn("Failed to allocate buffer space for chunk %d", chunkKey);
+                return false;
+            }
         }
         
         // Pack vertices into integers (4 ints per vertex)

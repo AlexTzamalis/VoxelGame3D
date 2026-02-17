@@ -65,8 +65,12 @@ public class MDIRenderer {
         visibleChunks.clear();
         
         for (Chunk chunk : chunks) {
-            // Check if chunk has data and is visible
-            if (chunk.getPooledMesh() != null && chunk.getPooledMesh().hasData()) {
+            // Check if chunk is in global buffer (MDI rendering)
+            long chunkKey = getChunkKey(chunk.getChunkX(), chunk.getChunkZ());
+            GlobalBufferManager.ChunkAllocation alloc = bufferManager.getAllocations().get(chunkKey);
+            
+            // Only include chunks that are in the global buffer and valid
+            if (alloc != null && alloc.valid && alloc.indexCount > 0) {
                 if (frustumCuller.isChunkInFrustum(
                         chunk.getChunkX(), chunk.getChunkZ(),
                         Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {

@@ -188,6 +188,8 @@ public class VoxelGame implements IGameLogic {
         this.f1WasPressed = false;
         this.escapeWasPressed = false;
         this.chunksProcessedThisFrame = 0;
+        // MDI rendering is enabled by default for performance
+        this.useMDIRendering = true;
     }
     
     @Override
@@ -207,11 +209,24 @@ public class VoxelGame implements IGameLogic {
         Logger.info("Building texture atlas...");
         textureAtlas = buildTextureAtlas();
         
-        // Load shaders
+        // Load shaders (use MDI shaders if MDI rendering is enabled)
         Logger.info("Loading shaders...");
         shaderProgram = new ShaderProgram();
-        String vertexShader = ResourceLoader.loadShader("simple_vertex.glsl");
-        String fragmentShader = ResourceLoader.loadShader("simple_fragment.glsl");
+        String vertexShader;
+        String fragmentShader;
+        
+        if (useMDIRendering) {
+            // Use MDI shaders for packed vertex data
+            vertexShader = ResourceLoader.loadShader("vertex_mdi.glsl");
+            fragmentShader = ResourceLoader.loadShader("fragment_mdi.glsl");
+            Logger.info("Using MDI shaders (packed vertex data)");
+        } else {
+            // Use standard shaders for traditional rendering
+            vertexShader = ResourceLoader.loadShader("simple_vertex.glsl");
+            fragmentShader = ResourceLoader.loadShader("simple_fragment.glsl");
+            Logger.info("Using standard shaders (unpacked vertex data)");
+        }
+        
         shaderProgram.createVertexShader(vertexShader);
         shaderProgram.createFragmentShader(fragmentShader);
         shaderProgram.link();
@@ -457,6 +472,13 @@ public class VoxelGame implements IGameLogic {
         
         // Cleanup MDI rendering resources
         if (globalBufferManager != null) {
+            // Deallocate all chunks from global buffer before cleanup
+            if (world != null) {
+                for (Chunk chunk : world.getChunks()) {
+                    long chunkKey = ((long) chunk.getChunkX() << 32) | (chunk.getChunkZ() & 0xFFFFFFFFL);
+                    globalBufferManager.deallocateChunk(chunkKey);
+                }
+            }
             globalBufferManager.cleanup();
             globalBufferManager = null;
         }
