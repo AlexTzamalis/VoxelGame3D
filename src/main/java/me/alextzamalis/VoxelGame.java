@@ -98,6 +98,9 @@ public class VoxelGame implements IGameLogic {
     /** Loading screen. */
     private LoadingScreen loadingScreen;
     
+    /** Settings screen. */
+    private SettingsScreen settingsScreen;
+    
     // ==================== Game World (initialized on world load) ====================
     
     /** The player controller. */
@@ -225,6 +228,10 @@ public class VoxelGame implements IGameLogic {
         loadingScreen = new LoadingScreen();
         loadingScreen.setOnLoadingComplete(this::onWorldLoadComplete);
         screenManager.registerScreen(GameState.LOADING, loadingScreen);
+        
+        // Create settings screen
+        settingsScreen = new SettingsScreen(screenManager);
+        screenManager.registerScreen(GameState.SETTINGS, settingsScreen);
         
         // Listen for state changes
         screenManager.setStateChangeListener((oldState, newState) -> {
@@ -422,6 +429,10 @@ public class VoxelGame implements IGameLogic {
                 
             case WORLD_CREATE:
                 worldCreateScreen.update(deltaTime, inputManager);
+                break;
+                
+            case SETTINGS:
+                settingsScreen.update(deltaTime, inputManager);
                 break;
                 
             case LOADING:
