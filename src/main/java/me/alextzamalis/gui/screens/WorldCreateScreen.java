@@ -8,6 +8,8 @@ import me.alextzamalis.gui.ScreenManager;
 import me.alextzamalis.gui.widgets.Button;
 import me.alextzamalis.input.InputManager;
 import me.alextzamalis.util.Logger;
+import me.alextzamalis.world.WorldMetadata;
+import me.alextzamalis.world.WorldSaveManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +22,7 @@ import java.util.Random;
  * <ul>
  *   <li>World name input</li>
  *   <li>Seed input (or random)</li>
- *   <li>Game mode selection (future)</li>
+ *   <li>Game mode selection</li>
  *   <li>Create button</li>
  * </ul>
  * 
@@ -34,6 +36,7 @@ public class WorldCreateScreen implements Screen {
     
     private final ScreenManager screenManager;
     private final Random random;
+    private final WorldSaveManager saveManager;
     
     /** Callback when world creation is confirmed. */
     private WorldCreateCallback onWorldCreate;
@@ -41,7 +44,7 @@ public class WorldCreateScreen implements Screen {
     /** Menu buttons. */
     private final List<Button> buttons;
     
-    /** Current world name (placeholder - will use text input later). */
+    /** Current world name. */
     private String worldName = "New World";
     
     /** Current seed (0 = random). */
@@ -49,6 +52,12 @@ public class WorldCreateScreen implements Screen {
     
     /** Whether to use a random seed. */
     private boolean useRandomSeed = true;
+    
+    /** Selected game mode. */
+    private int gameMode = WorldMetadata.GAME_MODE_CREATIVE;
+    
+    /** World counter for unique names. */
+    private static int worldCounter = 1;
     
     private int screenWidth;
     private int screenHeight;
@@ -69,6 +78,7 @@ public class WorldCreateScreen implements Screen {
         this.screenManager = screenManager;
         this.buttons = new ArrayList<>();
         this.random = new Random();
+        this.saveManager = WorldSaveManager.getInstance();
     }
     
     /**
@@ -96,14 +106,29 @@ public class WorldCreateScreen implements Screen {
         float centerX = screenWidth / 2f;
         float centerY = screenHeight / 2f;
         
+        // Game mode toggle button
+        Button gameModeBtn = new Button(centerX, centerY - 20, BUTTON_WIDTH * 1.5f, BUTTON_HEIGHT,
+                                       gameMode == WorldMetadata.GAME_MODE_CREATIVE ? "Game Mode: Creative" : "Game Mode: Survival");
+        gameModeBtn.init();
+        gameModeBtn.setOnClick(() -> {
+            gameMode = (gameMode == WorldMetadata.GAME_MODE_CREATIVE) 
+                      ? WorldMetadata.GAME_MODE_SURVIVAL 
+                      : WorldMetadata.GAME_MODE_CREATIVE;
+            createButtons(); // Refresh button text
+        });
+        buttons.add(gameModeBtn);
+        
         // Random seed toggle button
-        Button randomSeedBtn = new Button(centerX, centerY + 50, BUTTON_WIDTH * 1.5f, BUTTON_HEIGHT,
+        Button randomSeedBtn = new Button(centerX, centerY + 40, BUTTON_WIDTH * 1.5f, BUTTON_HEIGHT,
                                          useRandomSeed ? "Seed: Random" : "Seed: Custom");
         randomSeedBtn.init();
         randomSeedBtn.setOnClick(() -> {
             useRandomSeed = !useRandomSeed;
             if (useRandomSeed) {
                 worldSeed = 0;
+            } else {
+                // Generate a seed to show
+                worldSeed = random.nextLong() & 0xFFFFFFFFL; // Positive seed
             }
             createButtons(); // Refresh button text
         });
@@ -117,10 +142,20 @@ public class WorldCreateScreen implements Screen {
             // Generate random seed if needed
             long finalSeed = useRandomSeed ? random.nextLong() : worldSeed;
             
-            Logger.info("Creating world: %s (seed: %d)", worldName, finalSeed);
+            // Create world metadata
+            WorldMetadata metadata = new WorldMetadata(worldName, finalSeed);
+            metadata.setGameMode(gameMode);
             
-            if (onWorldCreate != null) {
-                onWorldCreate.onWorldCreate(worldName, finalSeed);
+            // Save world to disk
+            if (saveManager.createWorld(metadata)) {
+                Logger.info("Created world: %s (seed: %d, mode: %s)", 
+                           worldName, finalSeed, metadata.getGameModeString());
+                
+                if (onWorldCreate != null) {
+                    onWorldCreate.onWorldCreate(worldName, finalSeed);
+                }
+            } else {
+                Logger.error("Failed to create world: %s", worldName);
             }
         });
         buttons.add(createBtn);
@@ -138,10 +173,17 @@ public class WorldCreateScreen implements Screen {
     
     @Override
     public void onShow() {
-        // Reset to defaults
-        worldName = "New World " + (System.currentTimeMillis() % 1000);
+        // Generate unique world name
+        worldName = "New World " + worldCounter++;
+        
+        // Check if name already exists and increment
+        while (saveManager.worldExists(worldName)) {
+            worldName = "New World " + worldCounter++;
+        }
+        
         worldSeed = 0;
         useRandomSeed = true;
+        gameMode = WorldMetadata.GAME_MODE_CREATIVE;
         createButtons();
         
         Logger.debug("WorldCreateScreen shown");
@@ -177,28 +219,39 @@ public class WorldCreateScreen implements Screen {
         guiRenderer.drawRect(0, 0, screenWidth, screenHeight, 0.1f, 0.1f, 0.15f, 1.0f);
         
         // Draw title
-        guiRenderer.drawRect(screenWidth / 2f - 150, 50, 300, 40, 0.2f, 0.2f, 0.3f, 0.8f);
+        guiRenderer.setFontScale(3.0f);
+        guiRenderer.drawTextCentered("CREATE NEW WORLD", screenWidth / 2f, 50, 1.0f, 1.0f, 1.0f);
         
         float centerX = screenWidth / 2f;
         float centerY = screenHeight / 2f;
         
-        // World name input area (placeholder)
-        guiRenderer.drawRect(centerX - 200, centerY - 80, 400, 50, 0.15f, 0.15f, 0.2f, 1.0f);
-        guiRenderer.drawRect(centerX - 195, centerY - 75, 390, 40, 0.25f, 0.25f, 0.3f, 1.0f);
+        // World name label
+        guiRenderer.setFontScale(2.0f);
+        guiRenderer.drawText("WORLD NAME:", centerX - 200, centerY - 130, 0.8f, 0.8f, 0.8f);
         
-        // Label placeholders
-        guiRenderer.drawRect(centerX - 200, centerY - 110, 100, 20, 0.5f, 0.5f, 0.5f, 0.5f);
+        // World name input area (placeholder - shows current name)
+        guiRenderer.drawRect(centerX - 200, centerY - 100, 400, 50, 0.15f, 0.15f, 0.2f, 1.0f);
+        guiRenderer.drawRect(centerX - 195, centerY - 95, 390, 40, 0.25f, 0.25f, 0.3f, 1.0f);
+        
+        // Display world name
+        guiRenderer.drawText(worldName.toUpperCase(), centerX - 185, centerY - 85, 1.0f, 1.0f, 1.0f);
         
         // Seed display area (when custom)
         if (!useRandomSeed) {
+            guiRenderer.drawText("CUSTOM SEED:", centerX - 200, centerY + 80, 0.8f, 0.8f, 0.8f);
             guiRenderer.drawRect(centerX - 200, centerY + 100, 400, 50, 0.15f, 0.15f, 0.2f, 1.0f);
             guiRenderer.drawRect(centerX - 195, centerY + 105, 390, 40, 0.25f, 0.25f, 0.3f, 1.0f);
+            guiRenderer.drawText(String.valueOf(worldSeed), centerX - 185, centerY + 115, 1.0f, 1.0f, 1.0f);
         }
         
-        // Draw buttons
+        // Draw buttons (they render their own text)
         for (Button button : buttons) {
             button.render(guiRenderer);
         }
+        
+        // Draw hint text at bottom
+        guiRenderer.setFontScale(1.5f);
+        guiRenderer.drawTextCentered("TIP: RANDOM SEEDS CREATE UNIQUE WORLDS", screenWidth / 2f, screenHeight - 100, 0.5f, 0.5f, 0.5f);
     }
     
     @Override
@@ -217,4 +270,3 @@ public class WorldCreateScreen implements Screen {
         return buttons;
     }
 }
-

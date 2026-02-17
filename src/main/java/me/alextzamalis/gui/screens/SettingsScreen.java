@@ -129,13 +129,19 @@ public class SettingsScreen implements Screen {
         // Draw dark background
         guiRenderer.drawRect(0, 0, screenWidth, screenHeight, 0.1f, 0.1f, 0.15f, 1.0f);
         
-        // Draw title area
-        guiRenderer.drawRect(screenWidth / 2f - 100, 80, 200, 40, 0.2f, 0.2f, 0.3f, 0.8f);
+        // Draw title
+        guiRenderer.setFontScale(3.0f);
+        guiRenderer.drawTextCentered("SETTINGS", screenWidth / 2f, 80, 1.0f, 1.0f, 1.0f);
         
-        // Draw buttons
+        // Draw buttons (they render their own text)
+        guiRenderer.setFontScale(2.0f);
         for (Button button : buttons) {
             button.render(guiRenderer);
         }
+        
+        // Draw "coming soon" notice
+        guiRenderer.setFontScale(1.5f);
+        guiRenderer.drawTextCentered("MORE OPTIONS COMING SOON", screenWidth / 2f, screenHeight - 50, 0.5f, 0.5f, 0.5f);
     }
     
     @Override

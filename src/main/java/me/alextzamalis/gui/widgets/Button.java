@@ -155,7 +155,17 @@ public class Button {
             }
         }
         
-        // TODO: Render text when text rendering is implemented
+        // Render text centered on button
+        if (text != null && !text.isEmpty()) {
+            float centerX = x + width / 2;
+            float centerY = y + height / 2 - renderer.getTextHeight() / 2;
+            
+            if (enabled) {
+                renderer.drawTextCentered(text, centerX, centerY, 1.0f, 1.0f, 1.0f);
+            } else {
+                renderer.drawTextCentered(text, centerX, centerY, 0.5f, 0.5f, 0.5f);
+            }
+        }
     }
     
     /**

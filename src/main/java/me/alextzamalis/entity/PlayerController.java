@@ -355,6 +355,38 @@ public class PlayerController {
     }
     
     /**
+     * Checks if in creative mode.
+     * 
+     * @return true if creative mode
+     */
+    public boolean isCreative() {
+        return gameMode == GameMode.CREATIVE;
+    }
+    
+    /**
+     * Checks if in survival mode.
+     * 
+     * @return true if survival mode
+     */
+    public boolean isSurvival() {
+        return gameMode == GameMode.SURVIVAL;
+    }
+    
+    /**
+     * Sets to creative mode.
+     */
+    public void setCreativeMode() {
+        setGameMode(GameMode.CREATIVE);
+    }
+    
+    /**
+     * Sets to survival mode.
+     */
+    public void setSurvivalMode() {
+        setGameMode(GameMode.SURVIVAL);
+    }
+    
+    /**
      * Updates physics settings based on game mode.
      */
     private void updatePhysicsForGameMode() {

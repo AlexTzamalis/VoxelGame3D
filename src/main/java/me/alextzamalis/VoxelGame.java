@@ -18,6 +18,9 @@ import me.alextzamalis.voxel.BlockRegistry;
 import me.alextzamalis.voxel.Chunk;
 import me.alextzamalis.voxel.World;
 import me.alextzamalis.world.HeightmapGenerator;
+import me.alextzamalis.world.PlayerData;
+import me.alextzamalis.world.WorldMetadata;
+import me.alextzamalis.world.WorldSaveManager;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
@@ -288,13 +291,41 @@ public class VoxelGame implements IGameLogic {
     private void initializeWorld() throws Exception {
         Logger.info("Initializing world: %s", pendingWorldName);
         
-        // Clean up old world if exists
-        cleanupWorld();
+        // Don't call cleanupWorld() here as it would try to save a null world
+        // Just ensure old resources are cleaned up
+        if (gameHUD != null) { gameHUD.cleanup(); gameHUD = null; }
+        if (blockHighlight != null) { blockHighlight.cleanup(); blockHighlight = null; }
+        if (world != null) { world.cleanup(); world = null; }
+        
+        WorldSaveManager saveManager = WorldSaveManager.getInstance();
+        
+        // Load player data if exists
+        PlayerData playerData = saveManager.loadPlayerData(pendingWorldName);
+        Vector3f spawnPos;
+        if (playerData != null) {
+            spawnPos = new Vector3f((float)playerData.getX(), (float)playerData.getY(), (float)playerData.getZ());
+            Logger.info("Loaded player position: (%.1f, %.1f, %.1f)", spawnPos.x, spawnPos.y, spawnPos.z);
+        } else {
+            spawnPos = new Vector3f(0, 70, 0); // Default spawn
+            Logger.info("No saved player data, using default spawn");
+        }
         
         // Initialize player controller
         playerController = new PlayerController();
-        playerController.init(windowRef, new Vector3f(0, 70, 0));
+        playerController.init(windowRef, spawnPos);
         playerController.setMovementSpeed(10.0f);
+        
+        // Restore player rotation if saved
+        if (playerData != null) {
+            playerController.getCamera().setPitch(playerData.getPitch());
+            playerController.getCamera().setYaw(playerData.getYaw());
+            // Set game mode
+            if (playerData.isCreative()) {
+                playerController.setCreativeMode();
+            } else {
+                playerController.setSurvivalMode();
+            }
+        }
         
         // Initialize frustum culler
         frustumCuller = new FrustumCuller();
@@ -317,12 +348,21 @@ public class VoxelGame implements IGameLogic {
         // Initialize HUD
         gameHUD = new GameHUD();
         gameHUD.init(windowRef.getWidth(), windowRef.getHeight());
+        
+        // Restore hotbar selection
+        if (playerData != null) {
+            gameHUD.setSelectedSlot(playerData.getSelectedSlot());
+            blockInteraction.setSelectedBlockId(playerData.getSelectedSlot() + 1);
+        }
     }
     
     /**
-     * Cleans up the current world.
+     * Cleans up the current world, saving data first.
      */
     private void cleanupWorld() {
+        // Save world data before cleanup
+        saveWorldData();
+        
         if (gameHUD != null) {
             gameHUD.cleanup();
             gameHUD = null;
@@ -338,6 +378,50 @@ public class VoxelGame implements IGameLogic {
         blockInteraction = null;
         playerController = null;
         frustumCuller = null;
+    }
+    
+    /**
+     * Saves world and player data to disk.
+     */
+    private void saveWorldData() {
+        if (world == null || playerController == null) {
+            return;
+        }
+        
+        WorldSaveManager saveManager = WorldSaveManager.getInstance();
+        String worldName = world.getName();
+        
+        try {
+            // Save player data
+            PlayerData playerData = new PlayerData();
+            Vector3f pos = playerController.getPosition();
+            playerData.setPosition(pos.x, pos.y, pos.z);
+            playerData.setPitch(playerController.getCamera().getPitch());
+            playerData.setYaw(playerController.getCamera().getYaw());
+            playerData.setGameMode(playerController.isCreative() ? 
+                                   WorldMetadata.GAME_MODE_CREATIVE : 
+                                   WorldMetadata.GAME_MODE_SURVIVAL);
+            if (gameHUD != null) {
+                playerData.setSelectedSlot(gameHUD.getSelectedSlot());
+            }
+            
+            saveManager.savePlayerData(worldName, playerData);
+            
+            // Update world metadata (last played time)
+            WorldMetadata metadata = saveManager.loadWorldMetadata(worldName);
+            if (metadata != null) {
+                metadata.updateLastPlayed();
+                saveManager.saveWorldMetadata(metadata);
+            }
+            
+            // Save modified chunks
+            saveManager.saveWorld(world);
+            
+            Logger.info("World saved: %s", worldName);
+            
+        } catch (Exception e) {
+            Logger.error("Failed to save world data: %s", e.getMessage());
+        }
     }
     
     /**

@@ -224,6 +224,45 @@ public class Camera {
     }
     
     /**
+     * Gets the camera pitch (looking up/down).
+     * 
+     * @return The pitch in degrees
+     */
+    public float getPitch() {
+        return rotation.x;
+    }
+    
+    /**
+     * Sets the camera pitch (looking up/down).
+     * 
+     * @param pitch The pitch in degrees
+     */
+    public void setPitch(float pitch) {
+        rotation.x = Math.max(-90, Math.min(90, pitch));
+    }
+    
+    /**
+     * Gets the camera yaw (looking left/right).
+     * 
+     * @return The yaw in degrees
+     */
+    public float getYaw() {
+        return rotation.y;
+    }
+    
+    /**
+     * Sets the camera yaw (looking left/right).
+     * 
+     * @param yaw The yaw in degrees
+     */
+    public void setYaw(float yaw) {
+        rotation.y = yaw;
+        // Normalize to 0-360
+        while (rotation.y >= 360) rotation.y -= 360;
+        while (rotation.y < 0) rotation.y += 360;
+    }
+    
+    /**
      * Gets the view matrix.
      * 
      * @return The view matrix

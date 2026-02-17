@@ -158,20 +158,23 @@ public class MainMenuScreen implements Screen {
     
     @Override
     public void render(GuiRenderer guiRenderer) {
-        // Draw dark background
-        guiRenderer.drawRect(0, 0, screenWidth, screenHeight, 0.1f, 0.1f, 0.15f, 1.0f);
+        // Draw gradient-like background (darker at top, lighter at bottom)
+        guiRenderer.drawRect(0, 0, screenWidth, screenHeight, 0.05f, 0.05f, 0.1f, 1.0f);
         
-        // Draw title area (placeholder - will add logo later)
+        // Draw title
         float titleY = screenHeight / 4f;
-        guiRenderer.drawRect(screenWidth / 2f - 200, titleY - 30, 400, 60, 0.2f, 0.2f, 0.3f, 0.8f);
+        guiRenderer.setFontScale(4.0f);
+        guiRenderer.drawTextCentered("VOXEL GAME 3D", screenWidth / 2f, titleY - 20, 0.4f, 0.8f, 0.4f);
         
-        // Draw buttons
+        // Draw buttons (they render their own text)
+        guiRenderer.setFontScale(2.0f);
         for (Button button : buttons) {
             button.render(guiRenderer);
         }
         
         // Draw version info (bottom left)
-        guiRenderer.drawRect(5, screenHeight - 25, 150, 20, 0.0f, 0.0f, 0.0f, 0.5f);
+        guiRenderer.setFontScale(1.5f);
+        guiRenderer.drawText("VERSION 0.1", 10, screenHeight - 20, 0.7f, 0.7f, 0.7f);
     }
     
     @Override
