@@ -16,10 +16,10 @@ import me.alextzamalis.util.Logger;
 public class Main {
     
     /** Default window width. */
-    private static final int DEFAULT_WIDTH = 1280;
+    private static final int DEFAULT_WIDTH = 1920;
     
     /** Default window height. */
-    private static final int DEFAULT_HEIGHT = 720;
+    private static final int DEFAULT_HEIGHT = 1080;
     
     /** Window title. */
     private static final String WINDOW_TITLE = "Voxel Game 3D";

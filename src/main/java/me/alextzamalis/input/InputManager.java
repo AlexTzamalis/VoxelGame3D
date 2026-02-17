@@ -1,12 +1,24 @@
 package me.alextzamalis.input;
 
-import me.alextzamalis.core.Window;
+import static org.lwjgl.glfw.GLFW.GLFW_CURSOR;
+import static org.lwjgl.glfw.GLFW.GLFW_CURSOR_DISABLED;
+import static org.lwjgl.glfw.GLFW.GLFW_CURSOR_NORMAL;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_LAST;
+import static org.lwjgl.glfw.GLFW.GLFW_MOUSE_BUTTON_LAST;
+import static org.lwjgl.glfw.GLFW.GLFW_RELEASE;
+import static org.lwjgl.glfw.GLFW.glfwSetCursorEnterCallback;
+import static org.lwjgl.glfw.GLFW.glfwSetCursorPos;
+import static org.lwjgl.glfw.GLFW.glfwSetCursorPosCallback;
+import static org.lwjgl.glfw.GLFW.glfwSetInputMode;
+import static org.lwjgl.glfw.GLFW.glfwSetKeyCallback;
+import static org.lwjgl.glfw.GLFW.glfwSetMouseButtonCallback;
+import static org.lwjgl.glfw.GLFW.glfwSetScrollCallback;
 import org.lwjgl.glfw.GLFWCursorPosCallback;
 import org.lwjgl.glfw.GLFWKeyCallback;
 import org.lwjgl.glfw.GLFWMouseButtonCallback;
 import org.lwjgl.glfw.GLFWScrollCallback;
 
-import static org.lwjgl.glfw.GLFW.*;
+import me.alextzamalis.core.Window;
 
 /**
  * Manages all input from keyboard and mouse.
@@ -155,16 +167,17 @@ public class InputManager {
      */
     public void update(Window window) {
         if (cursorGrabbed && window != null) {
-            // When cursor is grabbed, continuously center it and calculate delta
+            // When cursor is grabbed, calculate delta from previous position first
+            // This ensures we capture the movement before resetting
+            deltaX = mouseX - previousMouseX;
+            deltaY = mouseY - previousMouseY;
+            
+            // Then center the cursor for next frame
             double centerX = window.getWidth() / 2.0;
             double centerY = window.getHeight() / 2.0;
-            
-            // Calculate delta from center
-            deltaX = mouseX - centerX;
-            deltaY = mouseY - centerY;
-            
-            // Reset cursor to center
             glfwSetCursorPos(windowHandle, centerX, centerY);
+            
+            // Update previous position for next frame
             previousMouseX = centerX;
             previousMouseY = centerY;
             mouseX = centerX;

@@ -129,6 +129,10 @@ public class Window {
             }
         }
         
+        // Make window visible and give it focus
+        glfwShowWindow(windowHandle);
+        glfwFocusWindow(windowHandle);
+        
         // Make the OpenGL context current
         glfwMakeContextCurrent(windowHandle);
         
