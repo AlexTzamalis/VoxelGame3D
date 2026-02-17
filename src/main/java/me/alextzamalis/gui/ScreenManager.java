@@ -177,9 +177,15 @@ public class ScreenManager {
      * Renders the current screen.
      */
     public void render() {
-        if (currentScreen != null && guiRenderer != null) {
+        if (guiRenderer != null) {
             guiRenderer.begin();
-            currentScreen.render(guiRenderer);
+            
+            // Debug: Always draw a test rectangle to verify rendering works
+            // guiRenderer.drawRect(100, 100, 200, 200, 1.0f, 0.0f, 0.0f, 1.0f);
+            
+            if (currentScreen != null) {
+                currentScreen.render(guiRenderer);
+            }
             guiRenderer.end();
         }
     }

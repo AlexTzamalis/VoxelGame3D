@@ -48,6 +48,9 @@ public class GuiRenderer {
     /** Current screen height. */
     private int screenHeight;
     
+    /** Font renderer for text. */
+    private FontRenderer fontRenderer;
+    
     /**
      * Creates a new GUI renderer.
      */
@@ -75,6 +78,10 @@ public class GuiRenderer {
         
         // Update projection
         updateProjection();
+        
+        // Create font renderer
+        fontRenderer = new FontRenderer();
+        fontRenderer.init(this);
     }
     
     /**
@@ -117,40 +124,38 @@ public class GuiRenderer {
      * Creates the GUI shader.
      */
     private void createShader() throws Exception {
-        String vertexShader = """
-            #version 330 core
-            layout (location = 0) in vec2 aPosition;
-            layout (location = 1) in vec2 aTexCoord;
-            
-            out vec2 texCoord;
-            
-            uniform mat4 projection;
-            uniform mat4 model;
-            
-            void main() {
-                gl_Position = projection * model * vec4(aPosition, 0.0, 1.0);
-                texCoord = aTexCoord;
-            }
-            """;
+        String vertexShader = 
+            "#version 330 core\n" +
+            "layout (location = 0) in vec2 aPosition;\n" +
+            "layout (location = 1) in vec2 aTexCoord;\n" +
+            "\n" +
+            "out vec2 texCoord;\n" +
+            "\n" +
+            "uniform mat4 projection;\n" +
+            "uniform mat4 model;\n" +
+            "\n" +
+            "void main() {\n" +
+            "    gl_Position = projection * model * vec4(aPosition, 0.0, 1.0);\n" +
+            "    texCoord = aTexCoord;\n" +
+            "}\n";
         
-        String fragmentShader = """
-            #version 330 core
-            in vec2 texCoord;
-            out vec4 fragColor;
-            
-            uniform sampler2D guiTexture;
-            uniform vec4 color;
-            uniform bool useTexture;
-            
-            void main() {
-                if (useTexture) {
-                    vec4 texColor = texture(guiTexture, texCoord);
-                    fragColor = texColor * color;
-                } else {
-                    fragColor = color;
-                }
-            }
-            """;
+        String fragmentShader = 
+            "#version 330 core\n" +
+            "in vec2 texCoord;\n" +
+            "out vec4 fragColor;\n" +
+            "\n" +
+            "uniform sampler2D guiTexture;\n" +
+            "uniform vec4 color;\n" +
+            "uniform int useTexture;\n" +
+            "\n" +
+            "void main() {\n" +
+            "    if (useTexture == 1) {\n" +
+            "        vec4 texColor = texture(guiTexture, texCoord);\n" +
+            "        fragColor = texColor * color;\n" +
+            "    } else {\n" +
+            "        fragColor = color;\n" +
+            "    }\n" +
+            "}\n";
         
         shader = new ShaderProgram();
         shader.createVertexShader(vertexShader);
@@ -190,6 +195,7 @@ public class GuiRenderer {
     public void begin() {
         // Disable depth testing for 2D
         glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
         
         // Enable blending for transparency
         glEnable(GL_BLEND);
@@ -206,8 +212,9 @@ public class GuiRenderer {
     public void end() {
         shader.unbind();
         
-        // Restore depth testing
+        // Restore depth testing and culling
         glEnable(GL_DEPTH_TEST);
+        glEnable(GL_CULL_FACE);
         glDisable(GL_BLEND);
     }
     
@@ -245,7 +252,7 @@ public class GuiRenderer {
         
         shader.setUniform("model", modelMatrix);
         shader.setUniform("color", r, g, b, a);
-        shader.setUniform("useTexture", true);
+        shader.setUniform("useTexture", 1);
         
         texture.bind(0);
         
@@ -276,7 +283,7 @@ public class GuiRenderer {
         
         shader.setUniform("model", modelMatrix);
         shader.setUniform("color", r, g, b, a);
-        shader.setUniform("useTexture", false);
+        shader.setUniform("useTexture", 0);
         
         glBindVertexArray(quadVao);
         glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -298,21 +305,97 @@ public class GuiRenderer {
     }
     
     /**
+     * Draws text at the specified position.
+     * 
+     * @param text The text to draw
+     * @param x X position
+     * @param y Y position
+     * @param r Red (0-1)
+     * @param g Green (0-1)
+     * @param b Blue (0-1)
+     */
+    public void drawText(String text, float x, float y, float r, float g, float b) {
+        if (fontRenderer != null) {
+            fontRenderer.drawStringWithShadow(text, x, y, r, g, b);
+        }
+    }
+    
+    /**
+     * Draws centered text.
+     * 
+     * @param text The text to draw
+     * @param centerX Center X position
+     * @param y Y position
+     * @param r Red (0-1)
+     * @param g Green (0-1)
+     * @param b Blue (0-1)
+     */
+    public void drawTextCentered(String text, float centerX, float y, float r, float g, float b) {
+        if (fontRenderer != null) {
+            fontRenderer.drawStringCenteredWithShadow(text, centerX, y, r, g, b);
+        }
+    }
+    
+    /**
+     * Gets the width of a text string.
+     * 
+     * @param text The text
+     * @return Width in pixels
+     */
+    public float getTextWidth(String text) {
+        return fontRenderer != null ? fontRenderer.getStringWidth(text) : 0;
+    }
+    
+    /**
+     * Gets the height of text.
+     * 
+     * @return Height in pixels
+     */
+    public float getTextHeight() {
+        return fontRenderer != null ? fontRenderer.getStringHeight() : 16;
+    }
+    
+    /**
+     * Sets the font scale.
+     * 
+     * @param scale Scale factor
+     */
+    public void setFontScale(float scale) {
+        if (fontRenderer != null) {
+            fontRenderer.setScale(scale);
+        }
+    }
+    
+    /**
      * Cleans up resources.
      */
     public void cleanup() {
-        if (shader != null) {
-            shader.cleanup();
-        }
-        
+        // Unbind everything first
         glBindVertexArray(0);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         
+        // Delete VBO
         if (quadVbo != 0) {
             glDeleteBuffers(quadVbo);
+            quadVbo = 0;
         }
+        
+        // Delete VAO
         if (quadVao != 0) {
             glDeleteVertexArrays(quadVao);
+            quadVao = 0;
+        }
+        
+        // Cleanup font renderer
+        if (fontRenderer != null) {
+            fontRenderer.cleanup();
+            fontRenderer = null;
+        }
+        
+        // Cleanup shader last
+        if (shader != null) {
+            shader.cleanup();
+            shader = null;
         }
     }
 }
