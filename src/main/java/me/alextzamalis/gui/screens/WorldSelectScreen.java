@@ -8,6 +8,8 @@ import me.alextzamalis.gui.ScreenManager;
 import me.alextzamalis.gui.widgets.Button;
 import me.alextzamalis.input.InputManager;
 import me.alextzamalis.util.Logger;
+import me.alextzamalis.world.WorldMetadata;
+import me.alextzamalis.world.WorldSaveManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,7 +19,7 @@ import java.util.List;
  * 
  * <p>Features:
  * <ul>
- *   <li>List of existing worlds (future: load from disk)</li>
+ *   <li>List of existing worlds loaded from disk</li>
  *   <li>Create New World button</li>
  *   <li>Play Selected World button</li>
  *   <li>Delete World button</li>
@@ -33,6 +35,7 @@ public class WorldSelectScreen implements Screen {
     private static final float BUTTON_HEIGHT = 40;
     
     private final ScreenManager screenManager;
+    private final WorldSaveManager saveManager;
     
     /** Callback when a world is selected to play. */
     private WorldSelectedCallback onWorldSelected;
@@ -40,11 +43,14 @@ public class WorldSelectScreen implements Screen {
     /** Menu buttons. */
     private final List<Button> buttons;
     
-    /** World list entries (placeholder for now). */
-    private final List<WorldEntry> worldEntries;
+    /** World list entries loaded from disk. */
+    private List<WorldMetadata> worldEntries;
     
     /** Currently selected world index. */
     private int selectedWorldIndex = -1;
+    
+    /** Track mouse press state for click detection. */
+    private boolean wasMousePressed = false;
     
     private int screenWidth;
     private int screenHeight;
@@ -57,21 +63,6 @@ public class WorldSelectScreen implements Screen {
     }
     
     /**
-     * Represents a world entry in the list.
-     */
-    public static class WorldEntry {
-        public final String name;
-        public final long seed;
-        public final String lastPlayed;
-        
-        public WorldEntry(String name, long seed, String lastPlayed) {
-            this.name = name;
-            this.seed = seed;
-            this.lastPlayed = lastPlayed;
-        }
-    }
-    
-    /**
      * Creates a new world select screen.
      * 
      * @param screenManager The screen manager
@@ -80,10 +71,7 @@ public class WorldSelectScreen implements Screen {
         this.screenManager = screenManager;
         this.buttons = new ArrayList<>();
         this.worldEntries = new ArrayList<>();
-        
-        // Add some placeholder worlds
-        worldEntries.add(new WorldEntry("Test World", 12345L, "Today"));
-        worldEntries.add(new WorldEntry("Survival World", 98765L, "Yesterday"));
+        this.saveManager = WorldSaveManager.getInstance();
     }
     
     /**
@@ -126,14 +114,32 @@ public class WorldSelectScreen implements Screen {
         playBtn.init();
         playBtn.setOnClick(() -> {
             if (selectedWorldIndex >= 0 && selectedWorldIndex < worldEntries.size()) {
-                WorldEntry entry = worldEntries.get(selectedWorldIndex);
-                Logger.info("Playing world: %s (seed: %d)", entry.name, entry.seed);
+                WorldMetadata entry = worldEntries.get(selectedWorldIndex);
+                Logger.info("Playing world: %s (seed: %d)", entry.getName(), entry.getSeed());
                 if (onWorldSelected != null) {
-                    onWorldSelected.onWorldSelected(entry.name, entry.seed);
+                    onWorldSelected.onWorldSelected(entry.getName(), entry.getSeed());
                 }
+            } else {
+                Logger.warn("No world selected");
             }
         });
         buttons.add(playBtn);
+        
+        // Delete button
+        Button deleteBtn = new Button(screenWidth / 2f + BUTTON_WIDTH + buttonSpacing, bottomY - BUTTON_HEIGHT - 10,
+                                     BUTTON_WIDTH, BUTTON_HEIGHT, "Delete World");
+        deleteBtn.init();
+        deleteBtn.setOnClick(() -> {
+            if (selectedWorldIndex >= 0 && selectedWorldIndex < worldEntries.size()) {
+                WorldMetadata entry = worldEntries.get(selectedWorldIndex);
+                Logger.info("Deleting world: %s", entry.getName());
+                if (saveManager.deleteWorld(entry.getName())) {
+                    refreshWorldList();
+                    selectedWorldIndex = -1;
+                }
+            }
+        });
+        buttons.add(deleteBtn);
         
         // Back button
         Button backBtn = new Button(screenWidth / 2f + BUTTON_WIDTH + buttonSpacing, bottomY,
@@ -146,9 +152,18 @@ public class WorldSelectScreen implements Screen {
         buttons.add(backBtn);
     }
     
+    /**
+     * Refreshes the world list from disk.
+     */
+    public void refreshWorldList() {
+        worldEntries = saveManager.listWorlds();
+        Logger.info("Found %d saved worlds", worldEntries.size());
+    }
+    
     @Override
     public void onShow() {
         selectedWorldIndex = -1;
+        refreshWorldList();
         Logger.debug("WorldSelectScreen shown");
     }
     
@@ -162,8 +177,10 @@ public class WorldSelectScreen implements Screen {
         // Check for world entry clicks
         double mouseX = inputManager.getMouseX();
         double mouseY = inputManager.getMouseY();
+        boolean mousePressed = inputManager.isMouseButtonPressed(0);
         
-        if (inputManager.isMouseButtonPressed(0)) {
+        // Detect click (mouse release)
+        if (wasMousePressed && !mousePressed) {
             // Check if clicking on a world entry
             float listStartY = 100;
             float entryHeight = 50;
@@ -175,10 +192,13 @@ public class WorldSelectScreen implements Screen {
                 if (mouseX >= listX && mouseX <= listX + listWidth &&
                     mouseY >= entryY && mouseY <= entryY + entryHeight) {
                     selectedWorldIndex = i;
+                    Logger.debug("Selected world index: %d", i);
                     break;
                 }
             }
         }
+        
+        wasMousePressed = mousePressed;
     }
     
     @Override
@@ -218,7 +238,7 @@ public class WorldSelectScreen implements Screen {
         // Draw world entries
         guiRenderer.setFontScale(2.0f);
         for (int i = 0; i < worldEntries.size(); i++) {
-            WorldEntry entry = worldEntries.get(i);
+            WorldMetadata entry = worldEntries.get(i);
             float entryY = listStartY + i * (entryHeight + 5);
             
             // Entry background (highlight if selected)
@@ -228,15 +248,20 @@ public class WorldSelectScreen implements Screen {
                 guiRenderer.drawRect(listX, entryY, listWidth, entryHeight, 0.2f, 0.2f, 0.25f, 1.0f);
             }
             
-            // World icon placeholder
-            guiRenderer.drawRect(listX + 5, entryY + 5, 40, 40, 0.4f, 0.6f, 0.4f, 1.0f);
+            // World icon placeholder (green for creative, brown for survival)
+            if (entry.getGameMode() == WorldMetadata.GAME_MODE_CREATIVE) {
+                guiRenderer.drawRect(listX + 5, entryY + 5, 40, 40, 0.4f, 0.6f, 0.4f, 1.0f);
+            } else {
+                guiRenderer.drawRect(listX + 5, entryY + 5, 40, 40, 0.6f, 0.4f, 0.3f, 1.0f);
+            }
             
             // World name
-            guiRenderer.drawText(entry.name, listX + 55, entryY + 8, 1.0f, 1.0f, 1.0f);
+            guiRenderer.drawText(entry.getName().toUpperCase(), listX + 55, entryY + 8, 1.0f, 1.0f, 1.0f);
             
-            // Last played info
+            // World info
             guiRenderer.setFontScale(1.5f);
-            guiRenderer.drawText("SEED: " + entry.seed + " - " + entry.lastPlayed, listX + 55, entryY + 30, 0.6f, 0.6f, 0.6f);
+            String info = entry.getGameModeString() + " - " + entry.getLastPlayedString();
+            guiRenderer.drawText(info.toUpperCase(), listX + 55, entryY + 30, 0.6f, 0.6f, 0.6f);
             guiRenderer.setFontScale(2.0f);
         }
         
@@ -269,15 +294,4 @@ public class WorldSelectScreen implements Screen {
     public List<Button> getButtons() {
         return buttons;
     }
-    
-    /**
-     * Adds a world entry to the list.
-     * 
-     * @param name World name
-     * @param seed World seed
-     */
-    public void addWorldEntry(String name, long seed) {
-        worldEntries.add(new WorldEntry(name, seed, "New"));
-    }
 }
-
