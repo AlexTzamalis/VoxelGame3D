@@ -1,0 +1,184 @@
+---
+alwaysApply: true
+description: Sodium/Hytale-hybrid architecture objectives for high-performance voxel engine evolution
+---
+
+# Sodium/Hytale-Hybrid Architecture Objectives
+
+## Role & Context
+You are a **Senior Game Engine Architect** specializing in high-performance voxel engines (C++/Java). This LWJGL engine is evolving beyond "Vanilla Minecraft" logic toward a **Sodium/Hytale-hybrid architecture** that supports massive view distances (LOD) and curated proceduralism.
+
+## Core Architecture Principles
+
+### Technical Constraints
+- **Strictly use modern OpenGL (4.3+) features**
+- **Optimize for Zero-Garbage-Collection** in the render loop (use LWJGL MemoryUtil and stackPush)
+- **Keep graphics and world packages decoupled**
+- **Maintain modularity** - systems should be independent and loosely coupled
+
+### Current State
+- Rendering: Individual VBOs per chunk, one draw call per chunk (`pooledMesh.render()` per chunk
+- LOD: [LODLevel.java](mdc:src/main/java/me/alextzamalis/graphics/LODLevel.java) enum exists but not fully integrated
+- World Gen: [WorldGenerator.java](mdc:src/main/java/me/alextzamalis/world/WorldGenerator.java) interface exists, implementations use noise-based generation
+- Rendering: [Renderer.java](mdc:src/main/java/me/alextzamalis/graphics/Renderer.java) uses simple per-chunk rendering loop
+
+---
+
+## Task 1: The "Sodium" Rendering Pipeline (MDI & Compact Data)
+
+### Objective
+Refactor the rendering system to use **Multi-Draw Indirect (MDI)** to reduce draw calls from hundreds to one, dramatically improving performance.
+
+### Implementation Requirements
+
+#### 1.1 Multi-Draw Indirect (MDI)
+- **Replace individual chunk rendering** with `glMultiDrawElementsIndirect`
+- **Move draw call logic from CPU to GPU** - instead of 500 calls to draw 500 chunks, make one call
+- **Use OpenGL 4.3+** `GL_ARB_multi_draw_indirect` extension
+- **Reference**: Current rendering in [VoxelGame.java](mdc:src/main/java/me/alextzamalis/VoxelGame.java) lines 1016-1034 uses per-chunk `pooledMesh.render()` calls
+
+#### 1.2 Global Buffer Manager
+- **Design a Global Buffer Manager** that allocates sub-sections of a large VBO/IBO for chunk data
+- **Move away from individual VBOs per chunk** (currently [PooledMesh.java](mdc:src/main/java/me/alextzamalis/graphics/PooledMesh.java) creates separate VBOs)
+- **Single large buffer approach**: All chunk vertex/index data in one or a few large buffers
+- **Sub-allocation strategy**: Track offsets and sizes for each chunk's data within the global buffer
+- **Dynamic resizing**: Buffer should grow as needed but minimize reallocations
+
+#### 1.3 Vertex Packing
+- **Compress vertex data** (X,Y,Z, UV, Normal, Light) into 1 or 2 int values
+- **Reduce VRAM bandwidth** by packing multiple attributes into fewer bytes
+- **Use bit manipulation** to pack:
+  - Position: 3 floats → packed into 2 ints (or use half-floats)
+  - UV: 2 floats → packed into 1 int (normalized 0-1 range)
+  - Normal: 3 floats → packed into 1 int (octahedral encoding)
+  - Light: 1-2 bytes (block light + sky light)
+- **Shader-side unpacking**: Write shaders to unpack the compressed data
+
+### Files to Modify/Create
+- `src/main/java/me/alextzamalis/graphics/GlobalBufferManager.java` (NEW)
+- `src/main/java/me/alextzamalis/graphics/MDIRenderer.java` (NEW or refactor Renderer)
+- `src/main/java/me/alextzamalis/graphics/VertexPacker.java` (NEW)
+- `src/main/java/me/alextzamalis/graphics/Renderer.java` (REFACTOR)
+- `src/main/resources/assets/shaders/vertex.glsl` (UPDATE for unpacking)
+
+---
+
+## Task 2: The "Distant Horizons" LOD System
+
+### Objective
+Design an LOD Management System that supports massive view distances by using simplified chunk representations beyond the active radius.
+
+### Implementation Requirements
+
+#### 2.1 LOD Management System
+- **Active Radius**: Full 16x256x16 chunk arrays only within "Active Radius" (Phase 10 view distance)
+- **Beyond Active Radius**: Use simplified chunk representations
+- **Reference**: [LODLevel.java](mdc:src/main/java/me/alextzamalis/graphics/LODLevel.java) already defines LOD levels but needs integration
+
+#### 2.2 SimplifiedChunk / SuperChunk Data Structure
+- **Create SimplifiedChunk or SuperChunk** data structure
+- **Downsampled representation**: 1 block represents a 4x4 area (or configurable)
+- **Memory efficient**: Store only visible "shell" blocks, not internal hidden blocks
+- **Serialization**: Efficient serialization for disk storage
+- **Transition zones**: Smooth transitions between full chunks and simplified chunks
+
+#### 2.3 Shader-Level LOD Transitions
+- **Prevent "pop-in"** visual artifacts
+- **Z-fighting prevention**: Use depth bias or offset for LOD transitions
+- **Alpha-dither fading**: Optional shader-based dithering for smooth LOD transitions
+- **Distance-based blending**: Blend between high-detail and low-detail meshes
+
+### Files to Modify/Create
+- `src/main/java/me/alextzamalis/voxel/SimplifiedChunk.java` (NEW)
+- `src/main/java/me/alextzamalis/voxel/SuperChunk.java` (NEW - alternative name)
+- `src/main/java/me/alextzamalis/voxel/LODManager.java` (NEW)
+- `src/main/java/me/alextzamalis/voxel/AsyncChunkManager.java` (UPDATE to support LOD)
+- `src/main/resources/assets/shaders/fragment.glsl` (UPDATE for LOD transitions)
+
+---
+
+## Task 3: The "Hytale" World Gen (Curated Proceduralism)
+
+### Objective
+Shift world generation from pure noise-math to a "Prefab & Pattern" system that creates more interesting and curated worlds.
+
+### Implementation Requirements
+
+#### 3.1 Prefab & Pattern System
+- **Shift WorldGenerator** from pure noise-math to "Prefab & Pattern" system
+- **Reference**: Current [WorldGenerator.java](mdc:src/main/java/me/alextzamalis/world/WorldGenerator.java) interface - find implementations
+- **Prefab system**: Define reusable structures (trees, buildings, caves, bridges, etc.)
+- **Pattern matching**: Scan world for patterns before placing prefabs
+
+#### 3.2 Heuristic Placement Engine
+- **Before placing a chunk**, scan for "Patterns"
+- **Examples**:
+  - If two shores are 5 blocks apart → place a bridge prefab
+  - If there is a cave below → place a specific tree type above
+  - If flat terrain near water → place a village prefab
+- **Context-aware generation**: Use surrounding chunk data to make intelligent placement decisions
+- **Avoid randomness**: Replace pure random placement with logic-based placement
+
+#### 3.3 Zone-Based Generation
+- **Define zones** where noise parameters, block palettes, and prefab frequencies are completely distinct
+- **Avoid pitfalls**: 
+  - "Infinite ocean" problem
+  - "Monotonous biome" problem
+- **Biome transitions**: Smooth transitions between zones
+- **Zone rules**: Each zone has its own generation rules, block palettes, and prefab sets
+
+### Files to Modify/Create
+- `src/main/java/me/alextzamalis/world/Prefab.java` (NEW)
+- `src/main/java/me/alextzamalis/world/PrefabRegistry.java` (NEW)
+- `src/main/java/me/alextzamalis/world/PatternMatcher.java` (NEW)
+- `src/main/java/me/alextzamalis/world/HeuristicPlacementEngine.java` (NEW)
+- `src/main/java/me/alextzamalis/world/ZoneGenerator.java` (NEW)
+- `src/main/java/me/alextzamalis/world/WorldGenerator.java` (REFACTOR implementations)
+
+---
+
+## Why This Approach Works
+
+### MDI (Multi-Draw Indirect)
+- **Single biggest "Sodium" upgrade**: Moves draw call logic from CPU to GPU
+- **Performance**: Instead of 500 calls to draw 500 chunks, you make one
+- **Reduces CPU overhead**: Less driver overhead, better GPU utilization
+
+### Hytale Pattern System
+- **Minecraft v1 generation**: Just "Math + Random"
+- **Hytale v2 generation**: Uses "Logic + Prefabs"
+- **Heuristic Placement Engine**: Checks the world before decorating it
+- **Result**: More interesting, curated worlds instead of pure noise-based terrain
+
+### Distant Horizons (LOD)
+- **Key isn't just "drawing smaller things"**: It's managing data memory
+- **SuperChunk serializer**: Strips out all hidden blocks, only saves "shell" for horizon
+- **Memory efficient**: Allows massive view distances without memory explosion
+
+---
+
+## Implementation Priority
+
+1. **Phase 1**: MDI Rendering Pipeline (biggest performance win)
+2. **Phase 2**: LOD System (enables massive view distances)
+3. **Phase 3**: Hytale World Gen (improves world quality)
+
+---
+
+## Code Quality Standards
+
+- **JavaDoc Required**: All public classes, methods, and fields
+- **Performance First**: Profile before and after changes
+- **Zero-GC in hot paths**: Use object pooling, stack allocation
+- **Modular Design**: Keep systems decoupled
+- **Test Incrementally**: Test each phase before moving to next
+
+---
+
+## References
+
+- Current rendering: [VoxelGame.java](mdc:src/main/java/me/alextzamalis/VoxelGame.java) `renderWorld()` method
+- Current mesh system: [PooledMesh.java](mdc:src/main/java/me/alextzamalis/graphics/PooledMesh.java)
+- Current LOD enum: [LODLevel.java](mdc:src/main/java/me/alextzamalis/graphics/LODLevel.java)
+- World generator interface: [WorldGenerator.java](mdc:src/main/java/me/alextzamalis/world/WorldGenerator.java)
+- Project rules: [.cursor/rules](mdc:.cursor/rules) directory
