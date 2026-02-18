@@ -19,6 +19,7 @@ import me.alextzamalis.voxel.BlockRegistry;
 import me.alextzamalis.voxel.Chunk;
 import me.alextzamalis.voxel.World;
 import me.alextzamalis.world.HeightmapGenerator;
+import me.alextzamalis.world.ZoneGenerator;
 import me.alextzamalis.world.PlayerData;
 import me.alextzamalis.world.WorldMetadata;
 import me.alextzamalis.world.WorldSaveManager;
@@ -138,6 +139,24 @@ public class VoxelGame implements IGameLogic {
     /** Frustum culler for visibility testing. */
     private FrustumCuller frustumCuller;
     
+    /** Global buffer manager for MDI rendering. */
+    private me.alextzamalis.graphics.GlobalBufferManager globalBufferManager;
+    
+    /** MDI renderer for efficient chunk rendering. */
+    private me.alextzamalis.graphics.MDIRenderer mdiRenderer;
+    
+    /** LOD manager for distant chunk simplification. */
+    private me.alextzamalis.voxel.LODManager lodManager;
+    
+    /** Simplified chunk mesh builder. */
+    private me.alextzamalis.voxel.SimplifiedChunkMeshBuilder simplifiedChunkMeshBuilder;
+    
+    /** Whether to use MDI rendering (can be toggled for testing). */
+    private boolean useMDIRendering = false; // Temporarily disabled until OpenGL 4.3+ is confirmed
+    
+    /** Whether to use LOD system (can be toggled for testing). */
+    private boolean useLOD = true;
+    
     /** Block interaction handler. */
     private BlockInteraction blockInteraction;
     
@@ -179,6 +198,9 @@ public class VoxelGame implements IGameLogic {
         this.f1WasPressed = false;
         this.escapeWasPressed = false;
         this.chunksProcessedThisFrame = 0;
+        // MDI rendering is enabled by default for performance
+        // MDI rendering disabled by default until OpenGL 4.3+ is confirmed available
+        // this.useMDIRendering = true;
     }
     
     @Override
@@ -194,15 +216,32 @@ public class VoxelGame implements IGameLogic {
         renderer.init();
         renderer.setClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Dark menu background
         
+        // Check OpenGL version (MDI disabled until shader compilation is fixed)
+        // checkAndEnableMDI(); // TODO: Re-enable when shader syntax is fixed
+        useMDIRendering = false; // Force disable until shader works
+        
         // Build texture atlas from all block textures (do this early for fast world loading later)
         Logger.info("Building texture atlas...");
         textureAtlas = buildTextureAtlas();
         
-        // Load shaders
+        // Load shaders (use MDI shaders if MDI rendering is enabled)
         Logger.info("Loading shaders...");
         shaderProgram = new ShaderProgram();
-        String vertexShader = ResourceLoader.loadShader("simple_vertex.glsl");
-        String fragmentShader = ResourceLoader.loadShader("simple_fragment.glsl");
+        String vertexShader;
+        String fragmentShader;
+        
+        if (useMDIRendering) {
+            // Use MDI shaders for packed vertex data
+            vertexShader = ResourceLoader.loadShader("vertex_mdi.glsl");
+            fragmentShader = ResourceLoader.loadShader("fragment_mdi.glsl");
+            Logger.info("Using MDI shaders (packed vertex data)");
+        } else {
+            // Use standard shaders for traditional rendering
+            vertexShader = ResourceLoader.loadShader("simple_vertex.glsl");
+            fragmentShader = ResourceLoader.loadShader("simple_fragment.glsl");
+            Logger.info("Using standard shaders (unpacked vertex data)");
+        }
+        
         shaderProgram.createVertexShader(vertexShader);
         shaderProgram.createFragmentShader(fragmentShader);
         shaderProgram.link();
@@ -229,6 +268,41 @@ public class VoxelGame implements IGameLogic {
         glfwSetInputMode(window.getWindowHandle(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         
         Logger.info("Voxel Game initialized! Starting in main menu.");
+    }
+    
+    /**
+     * Checks OpenGL version and enables MDI rendering if 4.3+ is available.
+     */
+    private void checkAndEnableMDI() {
+        String glVersion = org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_VERSION);
+        if (glVersion == null) {
+            Logger.warn("Could not determine OpenGL version, MDI disabled");
+            useMDIRendering = false;
+            return;
+        }
+        
+        int majorVersion = 0;
+        int minorVersion = 0;
+        try {
+            String[] parts = glVersion.split("\\.");
+            if (parts.length >= 2) {
+                majorVersion = Integer.parseInt(parts[0]);
+                minorVersion = Integer.parseInt(parts[1].split(" ")[0]);
+            }
+        } catch (Exception e) {
+            Logger.warn("Could not parse OpenGL version: %s", glVersion);
+            useMDIRendering = false;
+            return;
+        }
+        
+        if (majorVersion > 4 || (majorVersion == 4 && minorVersion >= 3)) {
+            useMDIRendering = true;
+            Logger.info("OpenGL %d.%d detected - MDI rendering enabled", majorVersion, minorVersion);
+        } else {
+            useMDIRendering = false;
+            Logger.warn("OpenGL %d.%d detected - MDI requires 4.3+, using fallback rendering", 
+                       majorVersion, minorVersion);
+        }
     }
     
     /**
@@ -385,10 +459,47 @@ public class VoxelGame implements IGameLogic {
         // Initialize frustum culler
         frustumCuller = new FrustumCuller();
         
-        // Initialize world with heightmap generator
+        // Initialize global buffer manager and MDI renderer for Sodium-style rendering
+        if (useMDIRendering) {
+            globalBufferManager = new me.alextzamalis.graphics.GlobalBufferManager();
+            mdiRenderer = new me.alextzamalis.graphics.MDIRenderer(globalBufferManager);
+            Logger.info("MDI rendering enabled - using Multi-Draw Indirect for chunk rendering");
+        }
+        
+        // Initialize world with zone-based generator (Hytale-style curated proceduralism)
         world = new World(pendingWorldName, pendingWorldSeed);
-        world.setGenerator(new HeightmapGenerator(world.getSeed(), 60, 20, 0.015f));
+        // Use ZoneGenerator for curated proceduralism (prefabs, patterns, zones)
+        world.setGenerator(new ZoneGenerator(world.getSeed()));
+        Logger.info("Using ZoneGenerator for Hytale-style world generation (prefabs, patterns, zones)");
+        
+        // Initialize LOD manager for distant chunk simplification (after world is created)
+        if (useLOD) {
+            int viewDist = getViewDistance();
+            lodManager = new me.alextzamalis.voxel.LODManager(world, viewDist);
+            
+            // Set LOD manager in MDI renderer
+            if (mdiRenderer != null) {
+                mdiRenderer.setLODManager(lodManager);
+            }
+            
+            // Initialize simplified chunk mesh builder
+            simplifiedChunkMeshBuilder = new me.alextzamalis.voxel.SimplifiedChunkMeshBuilder();
+            simplifiedChunkMeshBuilder.setTextureAtlas(textureAtlas);
+            if (globalBufferManager != null) {
+                simplifiedChunkMeshBuilder.setGlobalBufferManager(globalBufferManager);
+            }
+            
+            // Set mesh builder in LOD manager
+            lodManager.setMeshBuilder(simplifiedChunkMeshBuilder);
+            
+            Logger.info("LOD system enabled - simplified chunks beyond %d chunk radius", viewDist);
+        }
         world.setTextureAtlas(textureAtlas);
+        
+        // Set global buffer manager in mesh builder if MDI is enabled
+        if (useMDIRendering && globalBufferManager != null) {
+            world.setGlobalBufferManager(globalBufferManager);
+        }
         
         // Initialize async chunk manager (uses all CPU cores for chunk generation)
         int viewDist = getViewDistance();
@@ -433,6 +544,20 @@ public class VoxelGame implements IGameLogic {
             asyncChunkManager.shutdown();
             asyncChunkManager = null;
         }
+        
+        // Cleanup MDI rendering resources
+        if (globalBufferManager != null) {
+            // Deallocate all chunks from global buffer before cleanup
+            if (world != null) {
+                for (Chunk chunk : world.getChunks()) {
+                    long chunkKey = ((long) chunk.getChunkX() << 32) | (chunk.getChunkZ() & 0xFFFFFFFFL);
+                    globalBufferManager.deallocateChunk(chunkKey);
+                }
+            }
+            globalBufferManager.cleanup();
+            globalBufferManager = null;
+        }
+        mdiRenderer = null;
         
         if (gameHUD != null) {
             gameHUD.cleanup();
@@ -631,6 +756,11 @@ public class VoxelGame implements IGameLogic {
             
             // Update chunk generation (can be called from update thread)
             asyncChunkManager.updateGeneration(playerChunkX, playerChunkZ);
+            
+            // Update LOD manager (convert chunks to/from simplified based on distance)
+            if (lodManager != null && useLOD) {
+                lodManager.update(playerChunkX, playerChunkZ);
+            }
             
             // NOTE: Mesh building is done in render() method (main thread with OpenGL context)
             
@@ -1003,6 +1133,15 @@ public class VoxelGame implements IGameLogic {
         shaderProgram.setUniform("lightDirection", LIGHT_DIRECTION);
         shaderProgram.setUniform("ambientColor", AMBIENT_COLOR);
         
+        // LOD transition uniforms
+        if (useMDIRendering && useLOD) {
+            shaderProgram.setUniform("cameraPosition", camera.getPosition());
+            shaderProgram.setUniform("lodTransitionDistance", (float) (getViewDistance() * Chunk.WIDTH));
+            shaderProgram.setUniform("enableLODTransitions", true);
+        } else {
+            shaderProgram.setUniform("enableLODTransitions", false);
+        }
+        
         // Bind texture atlas
         textureAtlas.bind(0);
         
@@ -1013,22 +1152,36 @@ public class VoxelGame implements IGameLogic {
         // Update frustum culler
         frustumCuller.update(camera.getProjectionMatrix(), camera.getViewMatrix());
         
-        // Render visible chunks (using PooledMesh)
-        for (Chunk chunk : world.getChunks()) {
-            // Check for PooledMesh first (new system), then fallback to Mesh (old system)
-            PooledMesh pooledMesh = chunk.getPooledMesh();
-            if (pooledMesh != null && pooledMesh.hasData()) {
-                if (frustumCuller.isChunkInFrustum(
-                        chunk.getChunkX(), chunk.getChunkZ(),
-                        Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
-                    pooledMesh.render();
-                }
-            } else if (chunk.hasMesh()) {
-                // Fallback to old Mesh system for compatibility
-                if (frustumCuller.isChunkInFrustum(
-                        chunk.getChunkX(), chunk.getChunkZ(),
-                        Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
-                    chunk.getMesh().render();
+        // Render visible chunks using MDI if enabled, otherwise fallback to per-chunk rendering
+        if (useMDIRendering && mdiRenderer != null && globalBufferManager != null) {
+            // Prepare MDI renderer with visible chunks
+            mdiRenderer.prepareFrame(world.getChunks(), frustumCuller);
+            
+            // Build indirect draw commands
+            int commandCount = mdiRenderer.buildIndirectCommands();
+            
+            if (commandCount > 0) {
+                // Single draw call for all chunks!
+                mdiRenderer.render(commandCount);
+            }
+        } else {
+            // Fallback to per-chunk rendering (old system)
+            for (Chunk chunk : world.getChunks()) {
+                // Check for PooledMesh first (new system), then fallback to Mesh (old system)
+                PooledMesh pooledMesh = chunk.getPooledMesh();
+                if (pooledMesh != null && pooledMesh.hasData()) {
+                    if (frustumCuller.isChunkInFrustum(
+                            chunk.getChunkX(), chunk.getChunkZ(),
+                            Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
+                        pooledMesh.render();
+                    }
+                } else if (chunk.hasMesh()) {
+                    // Fallback to old Mesh system for compatibility
+                    if (frustumCuller.isChunkInFrustum(
+                            chunk.getChunkX(), chunk.getChunkZ(),
+                            Chunk.WIDTH, Chunk.HEIGHT, Chunk.DEPTH)) {
+                        chunk.getMesh().render();
+                    }
                 }
             }
         }

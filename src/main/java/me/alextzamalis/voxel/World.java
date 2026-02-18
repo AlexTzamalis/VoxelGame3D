@@ -260,16 +260,32 @@ public class World {
     /**
      * Builds the mesh for a chunk using a pooled mesh for efficiency.
      * 
+     * <p>If GlobalBufferManager is set, uses MDI rendering (packed vertices in global buffer).
+     * Otherwise, falls back to PooledMesh system.
+     * 
      * @param chunk The chunk
      */
     public void buildChunkMeshPooled(Chunk chunk) {
-        PooledMesh pooledMesh = meshBuilder.buildPooledMesh(chunk, chunk.getPooledMesh());
-        if (pooledMesh != null) {
-            chunk.setPooledMesh(pooledMesh);
+        // Check if we should use MDI rendering
+        if (meshBuilder != null && meshBuilder.getGlobalBufferManager() != null) {
+            // Use MDI rendering with global buffer
+            long chunkKey = getChunkKey(chunk.getChunkX(), chunk.getChunkZ());
+            boolean success = meshBuilder.buildGlobalBufferMesh(chunk, chunkKey);
+            if (success) {
+                chunk.markClean(); // Mark as clean if successfully built
+            }
+            // If failed, chunk remains dirty and can be retried later
+        } else {
+            // Fallback to PooledMesh system
+            PooledMesh pooledMesh = meshBuilder.buildPooledMesh(chunk, chunk.getPooledMesh());
+            if (pooledMesh != null) {
+                chunk.setPooledMesh(pooledMesh);
+            }
+            // If pooledMesh is null, mesh building failed (e.g., pool exhausted)
+            // The chunk will remain dirty and can be retried later
         }
-        // If pooledMesh is null, mesh building failed (e.g., pool exhausted)
-        // The chunk will remain dirty and can be retried later
     }
+    
     
     /**
      * Sets the async chunk manager for this world.
@@ -278,6 +294,17 @@ public class World {
      */
     public void setAsyncChunkManager(AsyncChunkManager asyncChunkManager) {
         this.asyncChunkManager = asyncChunkManager;
+    }
+    
+    /**
+     * Sets the global buffer manager for MDI rendering.
+     * 
+     * @param bufferManager The global buffer manager
+     */
+    public void setGlobalBufferManager(me.alextzamalis.graphics.GlobalBufferManager bufferManager) {
+        if (meshBuilder != null) {
+            meshBuilder.setGlobalBufferManager(bufferManager);
+        }
     }
     
     /**
@@ -385,6 +412,10 @@ public class World {
     public boolean unloadChunk(long key) {
         Chunk chunk = chunks.remove(key);
         if (chunk != null) {
+            // Deallocate from global buffer if using MDI rendering
+            if (meshBuilder != null && meshBuilder.getGlobalBufferManager() != null) {
+                meshBuilder.getGlobalBufferManager().deallocateChunk(key);
+            }
             chunk.cleanup();
             return true;
         }

@@ -278,6 +278,13 @@ public class Chunk {
     }
     
     /**
+     * Marks the chunk as clean (mesh is up to date).
+     */
+    public void markClean() {
+        this.dirty = false;
+    }
+    
+    /**
      * Checks if the chunk has been generated.
      * 
      * @return true if generated
