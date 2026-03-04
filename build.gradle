@@ -9,11 +9,11 @@ application {
 }
 
 group = 'me.alextzamalis'
-version = '1.0-SNAPSHOT'
+version = '1.0'
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_21 //17
+    targetCompatibility = JavaVersion.VERSION_21 //17
 }
 
 repositories {
