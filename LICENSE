@@ -22,9 +22,9 @@ SOFTWARE.
 
 ---
 
-DISCLAIMER: This project is an educational clone/recreation of Minecraft. 
+DISCLAIMER: This project is an educational clone/recreation of a voxel like minecraft game. 
 This project is not affiliated with, endorsed by, or connected to Mojang Studios 
 or Microsoft. Minecraft is a trademark of Mojang Studios. This project is created 
 for educational purposes to learn about game engine architecture, 3D graphics, 
-and voxel game development.
+and voxel game development. with opengl rendering
 
